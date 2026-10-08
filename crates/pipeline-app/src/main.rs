@@ -1,5 +1,41 @@
 use eframe::egui;
 use pipeline_engine::{ProjectEngine, ProjectOverview};
+use pipeline_terminal::TerminalSession;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+struct LayoutPrefs {
+    show_portfolio: bool,
+    show_terminal: bool,
+    portfolio_width: f32,
+    terminal_fraction: f32,
+    text_scale: f32,
+    dark_mode: bool,
+}
+
+impl Default for LayoutPrefs {
+    fn default() -> Self {
+        Self {
+            show_portfolio: true,
+            show_terminal: true,
+            portfolio_width: 285.0,
+            terminal_fraction: 0.35,
+            text_scale: 1.0,
+            dark_mode: true,
+        }
+    }
+}
+
+struct TerminalTab {
+    id: u64,
+    project_id: String,
+    title: String,
+    session: TerminalSession,
+    error: Option<String>,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -11,6 +47,7 @@ enum Tab {
 }
 
 struct DesktopApp {
+    data_dir: Option<PathBuf>,
     engine: Option<ProjectEngine>,
     projects: Vec<ProjectOverview>,
     selected_project: Option<String>,
@@ -21,14 +58,28 @@ struct DesktopApp {
     message: Option<String>,
     show_portfolio: bool,
     show_terminal: bool,
+    portfolio_width: f32,
     terminal_fraction: f32,
     text_scale: f32,
     dark_mode: bool,
+    terminals: Vec<TerminalTab>,
+    active_terminal: Option<u64>,
+    next_terminal_id: u64,
+    terminal_message: Option<String>,
 }
 
 impl Default for DesktopApp {
     fn default() -> Self {
+        let data_dir =
+            directories::ProjectDirs::from("dev", "Project Pipeline", "Project Pipeline")
+                .map(|dirs| dirs.data_local_dir().to_path_buf());
+        let prefs = data_dir
+            .as_ref()
+            .and_then(|dir| std::fs::read(dir.join("layout.json")).ok())
+            .and_then(|bytes| serde_json::from_slice::<LayoutPrefs>(&bytes).ok())
+            .unwrap_or_default();
         let mut app = Self {
+            data_dir: data_dir.clone(),
             engine: None,
             projects: Vec::new(),
             selected_project: None,
@@ -37,15 +88,18 @@ impl Default for DesktopApp {
             import_path: String::new(),
             import_name: String::new(),
             message: None,
-            show_portfolio: true,
-            show_terminal: true,
-            terminal_fraction: 0.35,
-            text_scale: 1.0,
-            dark_mode: true,
+            show_portfolio: prefs.show_portfolio,
+            show_terminal: prefs.show_terminal,
+            portfolio_width: prefs.portfolio_width.clamp(200.0, 700.0),
+            terminal_fraction: prefs.terminal_fraction.clamp(0.2, 0.75),
+            text_scale: prefs.text_scale.clamp(0.8, 2.0),
+            dark_mode: prefs.dark_mode,
+            terminals: Vec::new(),
+            active_terminal: None,
+            next_terminal_id: 1,
+            terminal_message: None,
         };
-        let database =
-            directories::ProjectDirs::from("dev", "Project Pipeline", "Project Pipeline")
-                .map(|dirs| dirs.data_local_dir().join("portfolio.sqlite"));
+        let database = data_dir.map(|dir| dir.join("portfolio.sqlite"));
         match database {
             Some(database) => {
                 let result = database
@@ -77,6 +131,26 @@ impl Default for DesktopApp {
     }
 }
 
+impl Drop for DesktopApp {
+    fn drop(&mut self) {
+        let Some(dir) = &self.data_dir else {
+            return;
+        };
+        let prefs = LayoutPrefs {
+            show_portfolio: self.show_portfolio,
+            show_terminal: self.show_terminal,
+            portfolio_width: self.portfolio_width,
+            terminal_fraction: self.terminal_fraction,
+            text_scale: self.text_scale,
+            dark_mode: self.dark_mode,
+        };
+        if let Ok(bytes) = serde_json::to_vec_pretty(&prefs) {
+            let _ = std::fs::write(dir.join("layout.json"), bytes);
+        }
+        // TerminalTab drops after this body and terminates any live shells.
+    }
+}
+
 impl DesktopApp {
     fn add_project(&mut self, create: bool) {
         let Some(engine) = self.engine.as_mut() else {
@@ -90,6 +164,7 @@ impl DesktopApp {
         match result {
             Ok(project) => {
                 self.selected_project = Some(project.id);
+                self.active_terminal = None;
                 match engine.list_overviews() {
                     Ok(projects) => {
                         self.projects = projects;
@@ -107,9 +182,9 @@ impl DesktopApp {
     }
 
     fn portfolio(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::left("portfolio")
+        let panel = egui::Panel::left("portfolio")
             .resizable(true)
-            .default_size(285.0)
+            .default_size(self.portfolio_width)
             .min_size(200.0)
             .show(ui, |ui| {
                 ui.heading("Projects");
@@ -132,6 +207,7 @@ impl DesktopApp {
                 }
                 ui.separator();
                 let needle = self.search.to_lowercase();
+                let mut selected = None;
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for project in &self.projects {
                         if !project.name.to_lowercase().contains(&needle) {
@@ -154,11 +230,213 @@ impl DesktopApp {
                             )
                             .clicked()
                         {
-                            self.selected_project = Some(project.id.clone());
+                            selected = Some(project.id.clone());
                         }
                     }
                 });
+                if let Some(id) = selected {
+                    self.select_project(id);
+                }
             });
+        self.portfolio_width = panel.response.rect.width();
+    }
+
+    fn select_project(&mut self, id: String) {
+        self.selected_project = Some(id.clone());
+        self.active_terminal = self
+            .terminals
+            .iter()
+            .find(|tab| tab.project_id == id)
+            .map(|tab| tab.id);
+        self.terminal_message = None;
+    }
+
+    fn start_terminal(&mut self) {
+        let Some(project) = self
+            .projects
+            .iter()
+            .find(|project| self.selected_project.as_deref() == Some(&project.id))
+        else {
+            self.terminal_message = Some("Select a project first".to_owned());
+            return;
+        };
+        match TerminalSession::spawn(Path::new(&project.path)) {
+            Ok(session) => {
+                let id = self.next_terminal_id;
+                self.next_terminal_id += 1;
+                self.terminals.push(TerminalTab {
+                    id,
+                    project_id: project.id.clone(),
+                    title: format!("Shell {id}"),
+                    session,
+                    error: None,
+                });
+                self.active_terminal = Some(id);
+                self.terminal_message = None;
+            }
+            Err(error) => self.terminal_message = Some(error.to_string()),
+        }
+    }
+
+    fn terminal_area(&mut self, ui: &mut egui::Ui) {
+        let selected_id = self.selected_project.clone();
+        let mut select = None;
+        let mut close = None;
+        let mut start = false;
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("+ New shell").clicked() {
+                start = true;
+            }
+            for tab in self
+                .terminals
+                .iter()
+                .filter(|tab| Some(&tab.project_id) == selected_id.as_ref())
+            {
+                if ui
+                    .selectable_label(self.active_terminal == Some(tab.id), &tab.title)
+                    .clicked()
+                {
+                    select = Some(tab.id);
+                }
+                if ui.small_button("×").clicked() {
+                    close = Some(tab.id);
+                }
+            }
+        });
+        if let Some(id) = select {
+            self.active_terminal = Some(id);
+        }
+        if let Some(id) = close {
+            self.terminals.retain(|tab| tab.id != id);
+            if self.active_terminal == Some(id) {
+                self.active_terminal = self
+                    .terminals
+                    .iter()
+                    .find(|tab| Some(&tab.project_id) == selected_id.as_ref())
+                    .map(|tab| tab.id);
+            }
+        }
+        if start {
+            self.start_terminal();
+        }
+        if let Some(message) = &self.terminal_message {
+            ui.label(message);
+        }
+        let active = self
+            .active_terminal
+            .and_then(|id| self.terminals.iter_mut().find(|tab| tab.id == id));
+        if let Some(tab) = active {
+            if let Some(error) = &tab.error {
+                ui.colored_label(egui::Color32::LIGHT_RED, error);
+            }
+            if let Some(status) = tab.session.exit_status() {
+                ui.label(format!("Shell exited: {status}"));
+            }
+            Self::terminal_screen(ui, tab);
+        } else if let Some(project) = self
+            .projects
+            .iter()
+            .find(|project| Some(&project.id) == selected_id.as_ref())
+        {
+            ui.label(format!("New shell starts in {}", project.path));
+        } else {
+            ui.label("Select a project to open a shell.");
+        }
+        // A resizable egui panel needs content that occupies its remaining
+        // height even before the first terminal tab is opened.
+        ui.allocate_space(ui.available_size());
+    }
+
+    fn terminal_screen(ui: &mut egui::Ui, tab: &mut TerminalTab) {
+        let available = ui.available_size();
+        let (rect, response) = ui.allocate_exact_size(available, egui::Sense::click());
+        if response.clicked() {
+            ui.memory_mut(|memory| memory.request_focus(response.id));
+        }
+        let focused = ui.memory(|memory| memory.has_focus(response.id));
+        ui.painter()
+            .rect_filled(rect, 0.0, egui::Color32::from_rgb(13, 17, 21));
+        let font = egui::FontId::monospace(14.0);
+        let glyph = ui
+            .painter()
+            .layout_no_wrap("M".to_owned(), font.clone(), egui::Color32::WHITE);
+        let char_width = glyph.size().x.max(1.0);
+        let line_height = glyph.size().y.max(1.0);
+        let cols = ((rect.width() - 8.0) / char_width) as u16;
+        let rows = ((rect.height() - 8.0) / line_height) as u16;
+        if let Err(error) = tab.session.resize(rows, cols) {
+            tab.error = Some(error.to_string());
+        }
+        if response.hovered() {
+            let wheel = ui.input(|input| input.smooth_scroll_delta.y);
+            if wheel.abs() > 1.0 {
+                let lines = (wheel.abs() / line_height).ceil() as usize;
+                let offset = if wheel > 0.0 {
+                    tab.session.scrollback().saturating_add(lines)
+                } else {
+                    tab.session.scrollback().saturating_sub(lines)
+                };
+                tab.session.set_scrollback(offset);
+            }
+        }
+        ui.painter().text(
+            rect.min + egui::vec2(4.0, 4.0),
+            egui::Align2::LEFT_TOP,
+            tab.session.contents(),
+            font,
+            egui::Color32::LIGHT_GRAY,
+        );
+        if focused {
+            ui.painter().rect_stroke(
+                rect,
+                0.0,
+                (1.0, egui::Color32::from_rgb(70, 130, 200)),
+                egui::StrokeKind::Inside,
+            );
+            let events = ui.input(|input| input.events.clone());
+            for event in events {
+                let bytes = match event {
+                    egui::Event::Text(text) => Some(text.into_bytes()),
+                    egui::Event::Paste(text) => Some(text.into_bytes()),
+                    egui::Event::Key {
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } => {
+                        if modifiers.ctrl {
+                            match key {
+                                egui::Key::C => Some(vec![3]),
+                                egui::Key::D => Some(vec![4]),
+                                _ => None,
+                            }
+                        } else {
+                            match key {
+                                egui::Key::Enter => Some(b"\r".to_vec()),
+                                egui::Key::Backspace => Some(vec![8]),
+                                egui::Key::Tab => Some(vec![9]),
+                                egui::Key::Escape => Some(vec![27]),
+                                egui::Key::ArrowUp => Some(b"\x1b[A".to_vec()),
+                                egui::Key::ArrowDown => Some(b"\x1b[B".to_vec()),
+                                egui::Key::ArrowRight => Some(b"\x1b[C".to_vec()),
+                                egui::Key::ArrowLeft => Some(b"\x1b[D".to_vec()),
+                                egui::Key::Home => Some(b"\x1b[H".to_vec()),
+                                egui::Key::End => Some(b"\x1b[F".to_vec()),
+                                egui::Key::Delete => Some(b"\x1b[3~".to_vec()),
+                                _ => None,
+                            }
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(bytes) = bytes
+                    && let Err(error) = tab.session.send(&bytes)
+                {
+                    tab.error = Some(error.to_string());
+                    break;
+                }
+            }
+        }
     }
 
     fn management(&mut self, ui: &mut egui::Ui) {
@@ -250,11 +528,6 @@ impl eframe::App for DesktopApp {
                 ui.separator();
                 ui.checkbox(&mut self.show_portfolio, "Portfolio (F1)");
                 ui.checkbox(&mut self.show_terminal, "Terminal (F2)");
-                if self.show_terminal {
-                    ui.add(
-                        egui::Slider::new(&mut self.terminal_fraction, 0.2..=0.65).text("Split"),
-                    );
-                }
                 ui.separator();
                 if ui.button("A−").clicked() {
                     self.text_scale = (self.text_scale - 0.1).max(0.8);
@@ -265,28 +538,29 @@ impl eframe::App for DesktopApp {
                 ui.checkbox(&mut self.dark_mode, "Dark");
             });
         });
-        ctx.set_pixels_per_point(self.text_scale);
+        ctx.set_zoom_factor(self.text_scale);
         if self.show_portfolio {
             self.portfolio(ui);
         }
-        egui::CentralPanel::default().show(ui, |ui| {
-            if self.show_terminal {
-                let upper_height = ui.available_height() * (1.0 - self.terminal_fraction);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), upper_height),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.set_min_height(upper_height);
-                        self.management(ui);
-                    },
-                );
-                ui.separator();
-                ui.heading("Terminal area");
-                ui.label("Terminal integration is planned for P07.");
-            } else {
-                self.management(ui);
+        for tab in &mut self.terminals {
+            if let Err(error) = tab.session.poll(32 * 1024) {
+                tab.error = Some(error.to_string());
             }
-        });
+        }
+        if !self.terminals.is_empty() {
+            ctx.request_repaint_after(Duration::from_millis(33));
+        }
+        if self.show_terminal {
+            let height = ui.available_height();
+            let panel = egui::Panel::bottom("terminal")
+                .resizable(true)
+                .default_size(height * self.terminal_fraction)
+                .min_size(120.0)
+                .show(ui, |ui| self.terminal_area(ui));
+            self.terminal_fraction =
+                (panel.response.rect.height() / height.max(1.0)).clamp(0.2, 0.75);
+        }
+        egui::CentralPanel::default().show(ui, |ui| self.management(ui));
     }
 }
 

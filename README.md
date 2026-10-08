@@ -32,7 +32,7 @@ cargo test --workspace
 cargo run -p pipeline-app
 ```
 
-The desktop now imports existing folders and Git repositories, creates project folders, and shows projects from a local SQLite database. Portfolio stage, health, blocked count, and verified completion come from persisted state. The terminal and planning/agent workspaces are still placeholders. The `spikes/` directory contains the validated UI and PTY prototypes and is excluded from the main Cargo workspace. See [implementation progress](plan/progress.md) and [portfolio evidence](docs/portfolio-build.md) for remaining verification.
+The desktop now imports existing folders and Git repositories, creates project folders, and shows projects from a local SQLite database. Portfolio stage, health, blocked count, and verified completion come from persisted state. The lower panel now has project-scoped PTY terminal tabs. Planning and agent workspaces are still placeholders. The `spikes/` directory contains the initial UI and PTY prototypes and is excluded from the main Cargo workspace. See [implementation progress](plan/progress.md) for remaining verification.
 
 ## Approval boundary
 

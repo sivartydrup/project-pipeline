@@ -15,6 +15,7 @@ Status values: **confirmed requirement**, **proposed**, **approved**, **rejected
 | D-009 | approved | Use `eframe`/`egui` for the Rust UI. | Windows layout spike passed; retain accessibility and M1 Max release checks in P19. |
 | D-010 | approved | Use SQLite for workflow metadata and keep source code in normal project folders. | Supports local-first use and offline access. |
 | D-011 | approved implementation sequencing | Configure three-OS CI in P04, but require actual Windows/macOS/Linux CI execution in P19 once this project has its own remote. | The current folder was nested inside an unrelated Git repository; this preserves the cross-platform release gate without blocking local implementation. |
+| D-012 | approved implementation choice | Use `portable-pty` with `vt100` parsing and a bounded reader queue for the first terminal integration. | The Windows PTY spike validated these libraries. UI frames process a limited output budget; a richer terminal renderer can build on the same session boundary. |
 
 ## Baseline approval
 

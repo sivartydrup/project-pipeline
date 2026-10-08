@@ -57,12 +57,15 @@ impl ProjectEngine {
         if !path.is_dir() {
             return Err(EngineError::MissingFolder(path.display().to_string()));
         }
-        let canonical = std::fs::canonicalize(path)?;
+        let canonical = dunce::canonicalize(path)?;
         if canonical.parent().is_none() {
             return Err(EngineError::InvalidFolder);
         }
         let canonical = canonical.to_string_lossy().into_owned();
-        if self.store.get_project_by_path(&canonical)?.is_some() {
+        let legacy = std::fs::canonicalize(path)?.to_string_lossy().into_owned();
+        if self.store.get_project_by_path(&canonical)?.is_some()
+            || self.store.get_project_by_path(&legacy)?.is_some()
+        {
             return Err(EngineError::AlreadyImported);
         }
         let name = if name.trim().is_empty() {
@@ -117,8 +120,14 @@ impl ProjectEngine {
                 Ok(ProjectOverview {
                     id: record.id,
                     name: record.name,
-                    path: record.path,
-                    git_root: record.git_root,
+                    path: dunce::simplified(Path::new(&record.path))
+                        .to_string_lossy()
+                        .into_owned(),
+                    git_root: record.git_root.map(|root| {
+                        dunce::simplified(Path::new(&root))
+                            .to_string_lossy()
+                            .into_owned()
+                    }),
                     stage: record.stage,
                     health: record.health,
                     verified_completion_basis_points: metrics.verified_completion_basis_points,
@@ -141,7 +150,7 @@ fn git_root(path: &Path) -> Option<String> {
         return None;
     }
     let reported = String::from_utf8(output.stdout).ok()?;
-    std::fs::canonicalize(reported.trim())
+    dunce::canonicalize(reported.trim())
         .ok()
         .map(|path| path.to_string_lossy().into_owned())
 }
