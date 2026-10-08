@@ -11,7 +11,7 @@ Project Pipeline is a planned cross-platform, local-first desktop application fo
 3. [Agent contract](docs/agent-contract.md): task protocol, write rules, evidence, approval gates, and recovery.
 4. [Delivery plan](docs/delivery-plan.md): phased implementation, vertical slices, test gates, and release criteria.
 5. [Machine-readable backlog](plan/backlog.json): dependency-ordered work items for an agent runner.
-6. [Decision register](docs/decisions.md): current assumptions and choices awaiting approval.
+6. [Decision register](docs/decisions.md): approved baseline choices and later implementation decisions.
 
 ## Product promise
 
@@ -32,7 +32,7 @@ cargo test --workspace
 cargo run -p pipeline-app
 ```
 
-The desktop currently shows sample projects and a terminal placeholder. The real local database, project import, and interactive terminal are subsequent backlog tasks. The `spikes/` directory contains the validated UI and PTY prototypes and is excluded from the main Cargo workspace.
+The desktop now imports existing folders and Git repositories, creates project folders, and shows projects from a local SQLite database. Portfolio stage, health, blocked count, and verified completion come from persisted state. The terminal and planning/agent workspaces are still placeholders. The `spikes/` directory contains the validated UI and PTY prototypes and is excluded from the main Cargo workspace. See [implementation progress](plan/progress.md) and [portfolio evidence](docs/portfolio-build.md) for remaining verification.
 
 ## Approval boundary
 
