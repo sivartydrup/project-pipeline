@@ -11,3 +11,5 @@ In the Research view, I marked a finding as a hypothesis, entered its claim, sum
 ## Automated verification
 
 Windows `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo build -p pipeline-app` passed. The [test log](evidence/p08-test.log) includes the idea-to-approval journey, database reopen, pending revision, visible field delta, stale revision conflict, source requirement, exact approval hash, and audit rollback checks. M1 Max hands-on testing remains a release gate under P19.
+
+Commit `da1d907` passed [GitHub Actions run 37773462205](https://github.com/sivartydrup/project-pipeline/actions/runs/37773462205) on `windows-2025`, `macos-15` ARM64, and `ubuntu-24.04`, including format, lint, workspace tests, and desktop build on each OS.
