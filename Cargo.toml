@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/pipeline-domain",
+    "crates/pipeline-store",
+    "crates/pipeline-engine",
+    "crates/pipeline-adapters",
+    "crates/pipeline-terminal",
+    "crates/pipeline-api",
+    "crates/pipeline-app",
+    "crates/pipeline-cli",
+]
+exclude = ["spikes/desktop", "spikes/pty"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+
+[workspace.dependencies]
+eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "default_fonts", "glow", "x11", "wayland"] }

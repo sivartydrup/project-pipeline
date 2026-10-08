@@ -1,0 +1,9 @@
+[package]
+name = "pipeline-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+pipeline-domain = { path = "../pipeline-domain" }
+pipeline-store = { path = "../pipeline-store" }

@@ -1,0 +1,5 @@
+[package]
+name = "pipeline-terminal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true

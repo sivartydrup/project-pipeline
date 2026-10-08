@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "plan_id": "project-pipeline-v0.1",
+  "status": "approved",
+  "approval_required_before_execution": false,
+  "approval_record": "docs/approval-2026-10-08.md",
+  "primary_targets": ["windows-x86_64", "macos-aarch64"],
+  "portability_target": "linux-x86_64",
+  "rules": {
+    "task_completion": "All acceptance criteria satisfied, required evidence attached, and reviewer transition to accepted.",
+    "dependency": "A task may start only when all depends_on items are accepted.",
+    "risk_gate": "External publication, spending, secrets, destructive actions, and production changes require scoped owner approval."
+  },
+  "tasks": [
+    {
+      "id": "P00", "phase": 0, "title": "Approve baseline and capture environment", "depends_on": [], "risk": "owner_decision", "owner_gate": true,
+      "outcome": "Approved scope revision and supported-machine profile exist.",
+      "acceptance": ["Owner approves product spec, architecture, agent contract, and delivery plan at exact revisions.", "Record Windows machine architecture, macOS M1 Max target, initial harness preference, and any provider constraints."],
+      "verification": ["Inspect signed-off decision register and scope revision."], "evidence": ["approval-record", "environment-profile"]
+    },
+    {
+      "id": "P01", "phase": 0, "title": "Validate Rust desktop UI toolkit", "depends_on": ["P00"], "risk": "low", "owner_gate": false,
+      "outcome": "A native Rust prototype renders the specified layout responsively.",
+      "acceptance": ["Resizable portfolio, management, and terminal areas work.", "Keyboard navigation, text scaling, high DPI, and large project/task list are evaluated.", "Document accessibility limitations and recommendation."],
+      "verification": ["Run prototype on Windows; record UI checklist. Repeat on M1 Max before release."], "evidence": ["screenshots", "ui-checklist", "toolkit-decision"]
+    },
+    {
+      "id": "P02", "phase": 0, "title": "Validate cross-platform terminal", "depends_on": ["P00"], "risk": "medium", "owner_gate": false,
+      "outcome": "Interactive native PTY prototype works on Windows and is designed for macOS validation.",
+      "acceptance": ["Launch native shell in a selected directory.", "Input, output, ANSI color, Unicode, resize, scrollback, and exit work.", "No shell process remains after tab close or app exit."],
+      "verification": ["Manual PTY matrix on Windows and automated parser tests; repeat on M1 Max before release."], "evidence": ["terminal-recording", "pty-matrix", "test-log"]
+    },
+    {
+      "id": "P03", "phase": 0, "title": "Validate harness integration surfaces", "depends_on": ["P00"], "risk": "medium", "owner_gate": false,
+      "outcome": "Capability matrix for OpenCode and Pi against installed/tested versions.",
+      "acceptance": ["Probe versions and start, event, stop, and recovery behavior.", "Record permission and diff event semantics.", "Identify unsupported capabilities and fallback behavior."],
+      "verification": ["Run minimal adapter experiments on Windows; repeat process-launch check on M1 Max before release."], "evidence": ["capability-matrix", "protocol-fixtures", "test-log"]
+    },
+    {
+      "id": "P04", "phase": 1, "title": "Create Rust workspace and CI", "depends_on": ["P01", "P02", "P03"], "risk": "low", "owner_gate": false,
+      "outcome": "Modular Rust application builds on primary platforms and Linux CI.",
+      "acceptance": ["Workspace separates domain, store, engine, adapters, terminal, API, app, and CLI concerns.", "Formatting, linting, tests, and builds pass locally on Windows; a three-OS CI workflow is configured.", "Native app launches with version/about view."],
+      "verification": ["cargo fmt --all --check", "cargo clippy --workspace --all-targets -- -D warnings", "cargo test --workspace", "cargo build -p pipeline-app", "Windows binary smoke test", "Inspect three-OS CI workflow; execute the matrix before P19 acceptance"], "evidence": ["workflow-file", "local-check-log", "binary-smoke-log"]
+    },
+    {
+      "id": "P05", "phase": 1, "title": "Implement persistent domain and audit", "depends_on": ["P04"], "risk": "medium", "owner_gate": false,
+      "outcome": "Project records survive restart and upgrades with a complete activity trail.",
+      "acceptance": ["Versioned SQLite schema implements core entities and foreign keys.", "Mutations and activity events commit atomically with optimistic revision checks.", "Backup, restore, export, and migration rollback/failure behavior are documented."],
+      "verification": ["Migration upgrade tests", "repository transaction/conflict tests", "backup/restore round trip"], "evidence": ["test-log", "schema-document"]
+    },
+    {
+      "id": "P06", "phase": 1, "title": "Create and import projects", "depends_on": ["P05"], "risk": "low", "owner_gate": false,
+      "outcome": "Owner sees real projects and accurate portfolio status.",
+      "acceptance": ["Create from folder and import existing Git repository without changing source files.", "Path validation handles Windows and macOS conventions.", "Portfolio shows stage, health, verified completion, blockers, and next owner action."],
+      "verification": ["Import two sample repositories on Windows; run persistence tests; repeat import on M1 Max before release"], "evidence": ["screenshots", "smoke-log"]
+    },
+    {
+      "id": "P07", "phase": 1, "title": "Build three-pane desktop shell and terminal tabs", "depends_on": ["P02", "P06"], "risk": "medium", "owner_gate": false,
+      "outcome": "Selected project, management workspace, and working shell coexist.",
+      "acceptance": ["Panels resize/collapse and remember state.", "Shell starts in selected project folder and terminal tabs remain distinct.", "Long output does not freeze the UI."],
+      "verification": ["Windows interactive smoke tests", "large-output responsiveness check", "M1 Max smoke test before release"], "evidence": ["screenshots", "terminal-smoke-log"]
+    },
+    {
+      "id": "P08", "phase": 2, "title": "Build idea intake, research, and brief approval", "depends_on": ["P06"], "risk": "low", "owner_gate": false,
+      "outcome": "A rough idea becomes a versioned, reviewable product brief.",
+      "acceptance": ["Guided intake captures audience, problem, constraints, and desired outcome.", "Research distinguishes sourced facts from hypotheses.", "Approval binds to an exact brief revision and changes produce visible deltas."],
+      "verification": ["Idea-to-approval journey test", "revision conflict test"], "evidence": ["journey-recording", "test-log"]
+    },
+    {
+      "id": "P09", "phase": 2, "title": "Build task graph and verified completion", "depends_on": ["P05", "P08"], "risk": "medium", "owner_gate": false,
+      "outcome": "Approved work has executable dependencies and measurable progress.",
+      "acceptance": ["Epics, tasks, criteria, weights, and dependency edges can be edited and reviewed.", "Cycles are rejected; blocked dependencies prevent scheduling.", "Completion counts only accepted weighted work in approved scope and updates after scope revision."],
+      "verification": ["Graph and completion property tests", "plan review UI smoke test"], "evidence": ["test-log", "sample-plan-export"]
+    },
+    {
+      "id": "P10", "phase": 2, "title": "Build decisions, inbox, and review history", "depends_on": ["P08", "P09"], "risk": "medium", "owner_gate": false,
+      "outcome": "Owner can inspect and act on every material decision.",
+      "acceptance": ["Decisions show alternatives, rationale, evidence, impact, actor, and supersession.", "Inbox prioritizes blockers/high impact and supports revision-bound approve/reject/edit.", "Portfolio, milestone, task, and action views link to the same underlying records."],
+      "verification": ["Decision audit journey test", "approval scope tests"], "evidence": ["screenshots", "test-log"]
+    },
+    {
+      "id": "P11", "phase": 3, "title": "Implement scoped agent write API and CLI", "depends_on": ["P05", "P09", "P10"], "risk": "high", "owner_gate": false,
+      "outcome": "Agents can read and update project state without direct database access.",
+      "acceptance": ["Loopback-only API and CLI implement the agent contract operations.", "Short-lived scoped tokens, idempotency, revision conflicts, path validation, and audit are enforced.", "Invalid, cross-project, stale, or replayed mutations are rejected."],
+      "verification": ["API contract tests", "authorization and replay tests", "secret redaction tests"], "evidence": ["openapi-or-command-spec", "security-test-log"]
+    },
+    {
+      "id": "P12", "phase": 3, "title": "Implement scheduler, isolation, and policy engine", "depends_on": ["P09", "P11"], "risk": "high", "owner_gate": false,
+      "outcome": "Only approved, unblocked work runs in a recoverable checkout.",
+      "acceptance": ["Run state machine enforces preflight and one active code-changing run per project.", "Git worktree lifecycle preserves partial work on failure.", "Risky actions request scoped approval; denied actions stay denied after retries/restart.", "Interrupted runs reconcile on restart without replaying external effects."],
+      "verification": ["Scheduler/state tests", "crash/restart simulation", "policy denial tests"], "evidence": ["test-log", "recovery-recording"]
+    },
+    {
+      "id": "P13", "phase": 3, "title": "Implement OpenCode adapter", "depends_on": ["P03", "P12"], "risk": "high", "owner_gate": false,
+      "outcome": "OpenCode sessions can execute scoped tasks with observable events.",
+      "acceptance": ["Probe, start, stream, steer, stop, and recover map to normalized run events.", "Permission requests map to the app policy without auto-approval.", "Version mismatch and server outage yield explicit degraded states."],
+      "verification": ["Adapter protocol fixtures", "live Windows session smoke tests", "M1 Max session smoke test before release"], "evidence": ["capability-report", "run-log", "test-log"]
+    },
+    {
+      "id": "P14", "phase": 3, "title": "Complete agent task and evidence review loop", "depends_on": ["P07", "P10", "P11", "P12", "P13"], "risk": "high", "owner_gate": false,
+      "outcome": "Owner can run and accept a real agent-produced task with traceable evidence.",
+      "acceptance": ["Task packet includes approved scope and stop conditions.", "Live run, diff, decisions, tests, and artifacts appear in review UI.", "Agent submission cannot self-accept; missing evidence prevents acceptance.", "Owner can request changes and rerun safely."],
+      "verification": ["End-to-end sample app task on Windows", "negative evidence tests", "M1 Max journey before release"], "evidence": ["journey-recording", "diff", "test-log"]
+    },
+    {
+      "id": "P15", "phase": 3, "title": "Implement Pi RPC adapter", "depends_on": ["P03", "P12", "P14"], "risk": "medium", "owner_gate": false,
+      "outcome": "Pi can perform the same task loop through its JSONL subprocess protocol.",
+      "acceptance": ["Strict LF-delimited framing handles Unicode and partial reads.", "Probe, start, events, steer, stop, and recovery declare actual supported capabilities.", "Task and policy semantics match OpenCode's normalized contract."],
+      "verification": ["Protocol fixture tests", "end-to-end Windows task run", "M1 Max task run before release"], "evidence": ["capability-report", "run-log", "test-log"]
+    },
+    {
+      "id": "P16", "phase": 4, "title": "Add design, UX, and asset review workflows", "depends_on": ["P10", "P14"], "risk": "low", "owner_gate": false,
+      "outcome": "Design work is visible and reviewable alongside code tasks.",
+      "acceptance": ["Flows, wireframes, screenshots, component notes, copy, assets, and accessibility reviews can be linked to tasks and decisions.", "Artifact hashes and provenance are displayed.", "Approval or revision requests preserve prior versions."],
+      "verification": ["Sample design-to-implementation journey"], "evidence": ["artifact-set", "journey-recording"]
+    },
+    {
+      "id": "P17", "phase": 4, "title": "Add release candidate and deployment record", "depends_on": ["P14"], "risk": "high", "owner_gate": false,
+      "outcome": "A release has reproducible provenance and explicit owner control.",
+      "acceptance": ["Candidate binds version, commit, builds, checks, target, and rollback plan.", "Failed required check blocks release approval.", "Manual deployment and smoke result can be recorded; production execution requires separate scoped approval."],
+      "verification": ["Sample release with failed then passing check", "approval gate tests"], "evidence": ["release-record", "test-log"]
+    },
+    {
+      "id": "P18", "phase": 4, "title": "Add launch, marketing, feedback, and operations workflows", "depends_on": ["P09", "P17"], "risk": "low", "owner_gate": false,
+      "outcome": "Work after code completion remains in the same project timeline.",
+      "acceptance": ["Positioning, launch copy/assets, channel plans, metrics, feedback, bugs, incidents, and maintenance tasks are supported.", "External publication remains approval-gated.", "Portfolio health reflects release and operations blockers."],
+      "verification": ["Sample idea-to-operation project walkthrough"], "evidence": ["walkthrough-record", "sample-export"]
+    },
+    {
+      "id": "P19", "phase": 5, "title": "Harden and package primary-platform release", "depends_on": ["P15", "P16", "P17", "P18"], "risk": "high", "owner_gate": true,
+      "outcome": "A reliable installable Windows and Apple Silicon macOS release candidate.",
+      "acceptance": ["Install/launch, onboarding, import, terminal, agent run/recovery, review, export, and manual release flow pass on both primary OSes.", "Windows, Apple Silicon macOS, and Linux CI build/tests pass from the project's own remote.", "Migration/restore, large-output performance, secret redaction, accessibility, and documentation gates pass.", "Known distribution signing/notarization limitations are documented and owner approves release candidate."],
+      "verification": ["Full cross-platform smoke matrix", "cargo test --workspace", "security and restore checklist"], "evidence": ["release-checklist", "signed-approval", "build-artifacts", "ci-link"]
+    }
+  ]
+}
