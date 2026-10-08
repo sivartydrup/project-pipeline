@@ -7,8 +7,9 @@ use serde_json::{Map, Value, json};
 use std::path::Path;
 use std::time::Duration;
 
-const CURRENT_SCHEMA_VERSION: i64 = 1;
+const CURRENT_SCHEMA_VERSION: i64 = 2;
 const INITIAL_SCHEMA: &str = include_str!("../migrations/001_initial.sql");
+const PROJECT_GIT_SCHEMA: &str = include_str!("../migrations/002_project_git.sql");
 const EXPORT_TABLES: &[&str] = &[
     "projects",
     "brief_revisions",
@@ -59,10 +60,17 @@ pub struct ProjectRecord {
     pub id: String,
     pub name: String,
     pub path: String,
+    pub git_root: Option<String>,
     pub stage: ProjectStage,
     pub health: ProjectHealth,
     pub active_scope_revision: i64,
     pub revision: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectMetrics {
+    pub verified_completion_basis_points: u16,
+    pub blocked_count: u32,
 }
 
 pub struct Store {
@@ -102,6 +110,18 @@ impl Store {
         actor: &str,
         correlation_id: &str,
     ) -> Result<ProjectRecord> {
+        self.create_project_with_git(id, name, path, None, actor, correlation_id)
+    }
+
+    pub fn create_project_with_git(
+        &mut self,
+        id: &str,
+        name: &str,
+        path: &str,
+        git_root: Option<&str>,
+        actor: &str,
+        correlation_id: &str,
+    ) -> Result<ProjectRecord> {
         validate_nonempty("id", id)?;
         validate_nonempty("name", name)?;
         validate_nonempty("path", path)?;
@@ -110,8 +130,8 @@ impl Store {
 
         let transaction = self.connection.transaction()?;
         transaction.execute(
-            "INSERT INTO projects(id, name, path) VALUES (?1, ?2, ?3)",
-            params![id, name.trim(), path],
+            "INSERT INTO projects(id, name, path, git_root, health) VALUES (?1, ?2, ?3, ?4, 'needs_input')",
+            params![id, name.trim(), path, git_root],
         )?;
         let project = get_project_from(&transaction, id)?
             .expect("project was inserted in the current transaction");
@@ -122,7 +142,7 @@ impl Store {
             "project.create",
             1,
             None,
-            Some(json!({"name": project.name, "path": project.path})),
+            Some(json!({"name": project.name, "path": project.path, "git_root": project.git_root})),
             correlation_id,
         )?;
         transaction.commit()?;
@@ -135,13 +155,45 @@ impl Store {
 
     pub fn list_projects(&self) -> Result<Vec<ProjectRecord>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, name, path, stage, health, active_scope_revision, revision \
+            "SELECT id, name, path, stage, health, active_scope_revision, revision, git_root \
              FROM projects ORDER BY name COLLATE NOCASE, id",
         )?;
         let projects = statement.query_map([], project_from_row)?;
         projects
             .map(|project| project.map_err(StoreError::from))
             .collect()
+    }
+
+    pub fn get_project_by_path(&self, path: &str) -> Result<Option<ProjectRecord>> {
+        let id: Option<String> = self
+            .connection
+            .query_row("SELECT id FROM projects WHERE path = ?1", [path], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        match id {
+            Some(id) => self.get_project(&id),
+            None => Ok(None),
+        }
+    }
+
+    pub fn project_metrics(&self, project_id: &str) -> Result<ProjectMetrics> {
+        let (accepted_weight, total_weight, blocked_count): (i64, i64, i64) = self.connection.query_row(
+            "SELECT COALESCE(SUM(CASE WHEN status='accepted' THEN weight ELSE 0 END), 0), \
+                    COALESCE(SUM(weight), 0), \
+                    COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END), 0) \
+             FROM tasks WHERE project_id=?1 AND scope_revision=(SELECT active_scope_revision FROM projects WHERE id=?1)",
+            [project_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        let completion = if total_weight == 0 {
+            0
+        } else {
+            (accepted_weight * 10_000 / total_weight) as u16
+        };
+        Ok(ProjectMetrics {
+            verified_completion_basis_points: completion,
+            blocked_count: blocked_count as u32,
+        })
     }
 
     pub fn rename_project(
@@ -287,12 +339,13 @@ fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRecord> 
         health: ProjectHealth::parse(&health).ok_or(rusqlite::Error::InvalidQuery)?,
         active_scope_revision: row.get(5)?,
         revision: row.get(6)?,
+        git_root: row.get(7)?,
     })
 }
 
 fn get_project_from(connection: &Connection, id: &str) -> rusqlite::Result<Option<ProjectRecord>> {
     connection.query_row(
-        "SELECT id, name, path, stage, health, active_scope_revision, revision FROM projects WHERE id = ?1",
+        "SELECT id, name, path, stage, health, active_scope_revision, revision, git_root FROM projects WHERE id = ?1",
         [id], project_from_row,
     ).optional()
 }
@@ -335,6 +388,9 @@ fn migrate(connection: &mut Connection) -> Result<()> {
     }
     if version == 0 {
         apply_migration(connection, 1, INITIAL_SCHEMA)?;
+    }
+    if version < 2 {
+        apply_migration(connection, 2, PROJECT_GIT_SCHEMA)?;
     }
     Ok(())
 }
@@ -423,7 +479,7 @@ mod tests {
         assert_eq!(restored.get_project("p1").unwrap().unwrap().name, "First");
         assert_eq!(restored.activity_count("p1").unwrap(), 1);
         let export: Value = serde_json::from_str(&restored.export_json().unwrap()).unwrap();
-        assert_eq!(export["schema_version"], 1);
+        assert_eq!(export["schema_version"], 2);
         assert_eq!(export["tables"]["projects"][0]["id"], "p1");
         assert_eq!(
             export["tables"]["activity_events"][0]["operation"],
@@ -486,5 +542,56 @@ mod tests {
             backup_before_upgrade(&connection, &path, 1, 2),
             Err(StoreError::BackupExists)
         ));
+    }
+
+    #[test]
+    fn upgrades_v1_and_creates_preupgrade_backup() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("pipeline.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        apply_migration(&mut connection, 1, INITIAL_SCHEMA).unwrap();
+        connection
+            .execute(
+                "INSERT INTO projects(id,name,path) VALUES ('p1','First','C:/first')",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 2);
+        assert_eq!(store.get_project("p1").unwrap().unwrap().git_root, None);
+        let backup = Connection::open(path.with_extension("pre-v1.sqlite")).unwrap();
+        let version: i64 = backup
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 1);
+    }
+
+    #[test]
+    fn portfolio_metrics_use_only_active_scope_and_accepted_weight() {
+        let mut store = Store::open_in_memory().unwrap();
+        store
+            .create_project("p1", "First", "C:/first", "owner", "create-1")
+            .unwrap();
+        store
+            .connection
+            .execute(
+                "UPDATE projects SET active_scope_revision=2 WHERE id='p1'",
+                [],
+            )
+            .unwrap();
+        for (id, status, weight, scope) in [
+            ("a", "accepted", 2, 2),
+            ("b", "blocked", 3, 2),
+            ("old", "accepted", 20, 1),
+        ] {
+            store.connection.execute(
+                "INSERT INTO tasks(id,project_id,title,outcome,status,weight,scope_revision) VALUES (?1,'p1',?1,'done',?2,?3,?4)",
+                params![id, status, weight, scope],
+            ).unwrap();
+        }
+        let metrics = store.project_metrics("p1").unwrap();
+        assert_eq!(metrics.verified_completion_basis_points, 4000);
+        assert_eq!(metrics.blocked_count, 1);
     }
 }

@@ -9,3 +9,4 @@ eframe.workspace = true
 pipeline-domain = { path = "../pipeline-domain" }
 pipeline-engine = { path = "../pipeline-engine" }
 pipeline-terminal = { path = "../pipeline-terminal" }
+directories = "6"

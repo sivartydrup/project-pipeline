@@ -1,0 +1,7 @@
+# Portfolio implementation evidence
+
+P06 adds a local project workflow through `ProjectEngine`. It canonicalizes folder paths, rejects duplicate imports, detects the Git root without writing to the source repository, and records project creation with an activity event. The app saves metadata in the OS-specific local data directory and shows persisted name, folder, Git root, stage, health, accepted-weight completion, blocked count, and next owner action. New projects begin in `idea` with `needs_input` health and an action to approve the brief. Creating a folder is an explicit separate button.
+
+Windows verification on 8 October 2026: a test created two separate Git repositories with a source file, imported both, confirmed source content unchanged, rejected duplicate imports, reopened SQLite, and found both projects. Store tests cover v1-to-v2 upgrade with backup and scope-weight metrics. `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo build -p pipeline-app` passed. The native app launched and remained running during a three-second process smoke check. The first pushed foundation commit passed GitHub Actions on `windows-2025`, `macos-15` ARM64, and `ubuntu-24.04`; the P06 commit needs its own CI run.
+
+Visual UI review and an M1 Max hands-on import remain required before P06 is accepted for both primary systems. The Plan, Decisions, Runs, and Terminal areas are clearly marked as upcoming integrations.

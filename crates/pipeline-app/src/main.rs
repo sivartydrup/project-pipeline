@@ -1,6 +1,5 @@
 use eframe::egui;
-
-const PROJECT_COUNT: usize = 10_000;
+use pipeline_engine::{ProjectEngine, ProjectOverview};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -11,10 +10,15 @@ enum Tab {
     About,
 }
 
-struct DesktopSpike {
-    selected_project: usize,
+struct DesktopApp {
+    engine: Option<ProjectEngine>,
+    projects: Vec<ProjectOverview>,
+    selected_project: Option<String>,
     active_tab: Tab,
     search: String,
+    import_path: String,
+    import_name: String,
+    message: Option<String>,
     show_portfolio: bool,
     show_terminal: bool,
     terminal_fraction: f32,
@@ -22,76 +26,139 @@ struct DesktopSpike {
     dark_mode: bool,
 }
 
-impl Default for DesktopSpike {
+impl Default for DesktopApp {
     fn default() -> Self {
-        Self {
-            selected_project: 0,
+        let mut app = Self {
+            engine: None,
+            projects: Vec::new(),
+            selected_project: None,
             active_tab: Tab::Overview,
             search: String::new(),
+            import_path: String::new(),
+            import_name: String::new(),
+            message: None,
             show_portfolio: true,
             show_terminal: true,
             terminal_fraction: 0.35,
             text_scale: 1.0,
             dark_mode: true,
+        };
+        let database =
+            directories::ProjectDirs::from("dev", "Project Pipeline", "Project Pipeline")
+                .map(|dirs| dirs.data_local_dir().join("portfolio.sqlite"));
+        match database {
+            Some(database) => {
+                let result = database
+                    .parent()
+                    .map(std::fs::create_dir_all)
+                    .transpose()
+                    .map_err(|error| error.to_string())
+                    .and_then(|_| {
+                        ProjectEngine::open(&database).map_err(|error| error.to_string())
+                    });
+                match result {
+                    Ok(engine) => {
+                        match engine.list_overviews() {
+                            Ok(projects) => app.projects = projects,
+                            Err(error) => {
+                                app.message = Some(format!("Unable to load projects: {error}"))
+                            }
+                        }
+                        app.selected_project =
+                            app.projects.first().map(|project| project.id.clone());
+                        app.engine = Some(engine);
+                    }
+                    Err(error) => app.message = Some(format!("Unable to open portfolio: {error}")),
+                }
+            }
+            None => app.message = Some("No local application data directory found".to_owned()),
         }
+        app
     }
 }
 
-impl DesktopSpike {
-    fn project_name(index: usize) -> String {
-        if index == 0 {
-            "Project Pipeline".to_owned()
+impl DesktopApp {
+    fn add_project(&mut self, create: bool) {
+        let Some(engine) = self.engine.as_mut() else {
+            return;
+        };
+        let result = if create {
+            engine.create_new(&self.import_path, &self.import_name)
         } else {
-            format!("Project {:05}", index + 1)
+            engine.import_existing(&self.import_path, &self.import_name)
+        };
+        match result {
+            Ok(project) => {
+                self.selected_project = Some(project.id);
+                match engine.list_overviews() {
+                    Ok(projects) => {
+                        self.projects = projects;
+                        self.message = Some("Project added to portfolio".to_owned());
+                    }
+                    Err(error) => {
+                        self.message = Some(format!("Project added, but refresh failed: {error}"))
+                    }
+                }
+                self.import_path.clear();
+                self.import_name.clear();
+            }
+            Err(error) => self.message = Some(error.to_string()),
         }
     }
 
     fn portfolio(&mut self, ui: &mut egui::Ui) {
         egui::Panel::left("portfolio")
             .resizable(true)
-            .default_size(260.0)
-            .min_size(180.0)
+            .default_size(285.0)
+            .min_size(200.0)
             .show(ui, |ui| {
                 ui.heading("Projects");
-                ui.horizontal(|ui| {
-                    ui.label("Search");
-                    ui.text_edit_singleline(&mut self.search);
-                });
+                ui.text_edit_singleline(&mut self.search);
                 ui.separator();
-
-                if self.search.is_empty() {
-                    egui::ScrollArea::vertical().show_rows(ui, 53.0, PROJECT_COUNT, |ui, range| {
-                        for index in range {
-                            self.project_row(ui, index);
-                        }
-                    });
-                } else {
-                    let needle = self.search.to_lowercase();
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for index in 0..PROJECT_COUNT {
-                            if Self::project_name(index).to_lowercase().contains(&needle) {
-                                self.project_row(ui, index);
-                            }
-                        }
-                    });
+                ui.label("Folder path");
+                ui.text_edit_singleline(&mut self.import_path);
+                ui.label("Project name (optional for import)");
+                ui.text_edit_singleline(&mut self.import_name);
+                ui.horizontal(|ui| {
+                    if ui.button("Import folder").clicked() {
+                        self.add_project(false);
+                    }
+                    if ui.button("Create folder & project").clicked() {
+                        self.add_project(true);
+                    }
+                });
+                if let Some(message) = &self.message {
+                    ui.label(message);
                 }
+                ui.separator();
+                let needle = self.search.to_lowercase();
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for project in &self.projects {
+                        if !project.name.to_lowercase().contains(&needle) {
+                            continue;
+                        }
+                        let label = format!(
+                            "{}\n{} · {} · {:.1}% verified · {} blocked",
+                            project.name,
+                            project.stage.as_str(),
+                            project.health.as_str(),
+                            project.verified_completion_basis_points as f32 / 100.0,
+                            project.blocked_count
+                        );
+                        if ui
+                            .add_sized(
+                                [ui.available_width(), 58.0],
+                                egui::Button::new(label).selected(
+                                    self.selected_project.as_deref() == Some(&project.id),
+                                ),
+                            )
+                            .clicked()
+                        {
+                            self.selected_project = Some(project.id.clone());
+                        }
+                    }
+                });
             });
-    }
-
-    fn project_row(&mut self, ui: &mut egui::Ui, index: usize) {
-        let name = Self::project_name(index);
-        let stage = if index == 0 { "Planning" } else { "Build" };
-        let completion = if index == 0 { 0 } else { (index * 7) % 100 };
-        let label = format!("{name}\n{stage} · {completion}% verified");
-        if ui
-            .add_sized(
-                [ui.available_width(), 46.0],
-                egui::Button::new(label).selected(self.selected_project == index),
-            )
-            .clicked()
-        {
-            self.selected_project = index;
-        }
     }
 
     fn management(&mut self, ui: &mut egui::Ui) {
@@ -109,41 +176,61 @@ impl DesktopSpike {
             }
         });
         ui.separator();
-        ui.heading(Self::project_name(self.selected_project));
+        let selected = self
+            .projects
+            .iter()
+            .find(|project| self.selected_project.as_deref() == Some(&project.id));
         match self.active_tab {
             Tab::Overview => {
-                ui.label("Stage: Planning");
-                ui.label("Health: Needs input");
-                ui.label("Verified completion: 0%");
-                ui.separator();
-                ui.label("Next owner action: approve the first executable task plan.");
+                if let Some(project) = selected {
+                    ui.heading(&project.name);
+                    ui.label(format!("Folder: {}", project.path));
+                    ui.label(format!(
+                        "Git root: {}",
+                        project
+                            .git_root
+                            .as_deref()
+                            .unwrap_or("No Git repository detected")
+                    ));
+                    ui.label(format!("Stage: {}", project.stage.as_str()));
+                    ui.label(format!("Health: {}", project.health.as_str()));
+                    ui.label(format!(
+                        "Verified completion: {:.1}%",
+                        project.verified_completion_basis_points as f32 / 100.0
+                    ));
+                    ui.label(format!("Blocked tasks: {}", project.blocked_count));
+                    ui.separator();
+                    ui.label(format!("Next owner action: {}", project.next_owner_action));
+                } else {
+                    ui.heading("No project selected");
+                    ui.label("Import an existing folder or create a new project.");
+                }
             }
             Tab::Plan => {
-                ui.heading("Milestones");
-                ui.label("Discovery → Design → Build → Verify → Release → Operate");
+                ui.heading("Plan");
+                ui.label("Brief and task planning are coming in the next milestones.");
             }
             Tab::Decisions => {
-                ui.heading("Decision inbox");
-                ui.label("Each decision will show alternatives, rationale, evidence, and approval status.");
+                ui.heading("Decisions");
+                ui.label("The decision inbox is not connected yet.");
             }
             Tab::Runs => {
                 ui.heading("Agent runs");
-                ui.label("OpenCode and Pi sessions will appear here with live progress.");
+                ui.label("Harness integration is not connected yet.");
             }
             Tab::About => {
                 ui.heading("Project Pipeline");
                 ui.label(format!(
-                    "Version {} · foundation build",
+                    "Version {} · local portfolio build",
                     env!("CARGO_PKG_VERSION")
                 ));
-                ui.label("This build uses sample project data while persistence is implemented.");
                 ui.label("Windows and Apple Silicon macOS are the primary targets.");
             }
         }
     }
 }
 
-impl eframe::App for DesktopSpike {
+impl eframe::App for DesktopApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         ctx.set_visuals(if self.dark_mode {
@@ -157,13 +244,9 @@ impl eframe::App for DesktopSpike {
         if ctx.input(|input| input.key_pressed(egui::Key::F2)) {
             self.show_terminal = !self.show_terminal;
         }
-
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.strong(format!(
-                    "Project Pipeline {} · prototype data",
-                    env!("CARGO_PKG_VERSION")
-                ));
+                ui.strong(format!("Project Pipeline {}", env!("CARGO_PKG_VERSION")));
                 ui.separator();
                 ui.checkbox(&mut self.show_portfolio, "Portfolio (F1)");
                 ui.checkbox(&mut self.show_terminal, "Terminal (F2)");
@@ -183,7 +266,6 @@ impl eframe::App for DesktopSpike {
             });
         });
         ctx.set_pixels_per_point(self.text_scale);
-
         if self.show_portfolio {
             self.portfolio(ui);
         }
@@ -200,7 +282,7 @@ impl eframe::App for DesktopSpike {
                 );
                 ui.separator();
                 ui.heading("Terminal area");
-                ui.label("PTY integration is the next validation spike.");
+                ui.label("Terminal integration is planned for P07.");
             } else {
                 self.management(ui);
             }
@@ -216,6 +298,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Project Pipeline",
         options,
-        Box::new(|_cc| Ok(Box::<DesktopSpike>::default())),
+        Box::new(|_cc| Ok(Box::<DesktopApp>::default())),
     )
 }
