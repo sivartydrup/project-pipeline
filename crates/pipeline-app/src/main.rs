@@ -1,5 +1,5 @@
 use eframe::egui;
-use pipeline_engine::{ProjectEngine, ProjectOverview};
+use pipeline_engine::{BriefContent, DiscoveryView, ProjectEngine, ProjectOverview, ResearchInput};
 use pipeline_terminal::TerminalSession;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -40,6 +40,8 @@ struct TerminalTab {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Overview,
+    Brief,
+    Research,
     Plan,
     Decisions,
     Runs,
@@ -56,6 +58,10 @@ struct DesktopApp {
     import_path: String,
     import_name: String,
     message: Option<String>,
+    discovery: Option<DiscoveryView>,
+    brief_draft: BriefContent,
+    research_draft: ResearchInput,
+    discovery_message: Option<String>,
     show_portfolio: bool,
     show_terminal: bool,
     portfolio_width: f32,
@@ -70,9 +76,12 @@ struct DesktopApp {
 
 impl Default for DesktopApp {
     fn default() -> Self {
-        let data_dir =
-            directories::ProjectDirs::from("dev", "Project Pipeline", "Project Pipeline")
-                .map(|dirs| dirs.data_local_dir().to_path_buf());
+        let data_dir = std::env::var_os("PIPELINE_DATA_DIR")
+            .map(PathBuf::from)
+            .or_else(|| {
+                directories::ProjectDirs::from("dev", "Project Pipeline", "Project Pipeline")
+                    .map(|dirs| dirs.data_local_dir().to_path_buf())
+            });
         let prefs = data_dir
             .as_ref()
             .and_then(|dir| std::fs::read(dir.join("layout.json")).ok())
@@ -88,6 +97,13 @@ impl Default for DesktopApp {
             import_path: String::new(),
             import_name: String::new(),
             message: None,
+            discovery: None,
+            brief_draft: BriefContent::default(),
+            research_draft: ResearchInput {
+                confidence: "medium".to_owned(),
+                ..Default::default()
+            },
+            discovery_message: None,
             show_portfolio: prefs.show_portfolio,
             show_terminal: prefs.show_terminal,
             portfolio_width: prefs.portfolio_width.clamp(200.0, 700.0),
@@ -120,6 +136,17 @@ impl Default for DesktopApp {
                         }
                         app.selected_project =
                             app.projects.first().map(|project| project.id.clone());
+                        if let Some(project_id) = &app.selected_project {
+                            match engine.load_discovery(project_id) {
+                                Ok(view) => {
+                                    app.brief_draft = view.latest_content();
+                                    app.discovery = Some(view);
+                                }
+                                Err(error) => {
+                                    app.message = Some(format!("Unable to load brief: {error}"))
+                                }
+                            }
+                        }
                         app.engine = Some(engine);
                     }
                     Err(error) => app.message = Some(format!("Unable to open portfolio: {error}")),
@@ -176,6 +203,7 @@ impl DesktopApp {
                 }
                 self.import_path.clear();
                 self.import_name.clear();
+                self.refresh_discovery();
             }
             Err(error) => self.message = Some(error.to_string()),
         }
@@ -249,6 +277,89 @@ impl DesktopApp {
             .find(|tab| tab.project_id == id)
             .map(|tab| tab.id);
         self.terminal_message = None;
+        self.refresh_discovery();
+    }
+
+    fn refresh_discovery(&mut self) {
+        let Some(project_id) = &self.selected_project else {
+            self.discovery = None;
+            self.brief_draft = BriefContent::default();
+            return;
+        };
+        let Some(engine) = &self.engine else {
+            return;
+        };
+        match engine.load_discovery(project_id) {
+            Ok(view) => {
+                self.brief_draft = view.latest_content();
+                self.discovery = Some(view);
+                self.discovery_message = None;
+            }
+            Err(error) => self.discovery_message = Some(error.to_string()),
+        }
+    }
+
+    fn save_brief(&mut self) {
+        let (Some(engine), Some(project_id)) =
+            (self.engine.as_mut(), self.selected_project.as_deref())
+        else {
+            return;
+        };
+        let expected = self
+            .discovery
+            .as_ref()
+            .map_or(0, DiscoveryView::latest_revision);
+        match engine.save_brief(project_id, expected, &self.brief_draft) {
+            Ok(view) => {
+                self.discovery = Some(view);
+                self.discovery_message = Some(format!("Saved brief revision {}", expected + 1));
+                if let Ok(projects) = engine.list_overviews() {
+                    self.projects = projects;
+                }
+            }
+            Err(error) => self.discovery_message = Some(error.to_string()),
+        }
+    }
+
+    fn approve_brief(&mut self) {
+        let (Some(engine), Some(project_id)) =
+            (self.engine.as_mut(), self.selected_project.as_deref())
+        else {
+            return;
+        };
+        let expected = self
+            .discovery
+            .as_ref()
+            .map_or(0, DiscoveryView::latest_revision);
+        match engine.approve_latest_brief(project_id, expected) {
+            Ok(view) => {
+                self.discovery = Some(view);
+                self.discovery_message = Some(format!("Approved brief revision {expected}"));
+                if let Ok(projects) = engine.list_overviews() {
+                    self.projects = projects;
+                }
+            }
+            Err(error) => self.discovery_message = Some(error.to_string()),
+        }
+    }
+
+    fn record_research(&mut self) {
+        let (Some(engine), Some(project_id)) =
+            (self.engine.as_mut(), self.selected_project.as_deref())
+        else {
+            return;
+        };
+        match engine.record_research(project_id, &self.research_draft) {
+            Ok(view) => {
+                self.discovery = Some(view);
+                self.discovery_message = Some("Research finding recorded".to_owned());
+                self.research_draft = ResearchInput {
+                    confidence: "medium".to_owned(),
+                    ..Default::default()
+                };
+            }
+            Err(error) => self.discovery_message = Some(error.to_string()),
+        }
     }
 
     fn start_terminal(&mut self) {
@@ -439,10 +550,210 @@ impl DesktopApp {
         }
     }
 
+    fn brief_workspace(&mut self, ui: &mut egui::Ui) {
+        let latest = self
+            .discovery
+            .as_ref()
+            .map_or(0, DiscoveryView::latest_revision);
+        let approved = self
+            .discovery
+            .as_ref()
+            .map_or(0, |view| view.approved_revision);
+        let dirty = self
+            .discovery
+            .as_ref()
+            .is_some_and(|view| self.brief_draft != view.latest_content());
+        let mut save = false;
+        let mut approve = false;
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.heading("Product brief");
+            if self.selected_project.is_none() {
+                ui.label("Select a project first.");
+                return;
+            }
+            ui.label(format!(
+                "Latest revision: {latest} · Approved revision: {approved}"
+            ));
+            ui.label(
+                "Start with the four required intake fields. Add detail as the idea develops.",
+            );
+            brief_field(ui, "Idea", &mut self.brief_draft.idea, 2);
+            brief_field(ui, "Audience", &mut self.brief_draft.audience, 2);
+            brief_field(ui, "Problem", &mut self.brief_draft.problem, 2);
+            brief_field(
+                ui,
+                "Desired outcome",
+                &mut self.brief_draft.desired_outcome,
+                2,
+            );
+            brief_field(ui, "Constraints", &mut self.brief_draft.constraints, 2);
+            brief_field(
+                ui,
+                "Value proposition",
+                &mut self.brief_draft.value_proposition,
+                2,
+            );
+            brief_field(ui, "Scope", &mut self.brief_draft.scope, 3);
+            brief_field(ui, "Non-goals", &mut self.brief_draft.non_goals, 2);
+            brief_field(ui, "User journeys", &mut self.brief_draft.user_journeys, 3);
+            brief_field(
+                ui,
+                "Success metrics",
+                &mut self.brief_draft.success_metrics,
+                2,
+            );
+            brief_field(ui, "UX principles", &mut self.brief_draft.ux_principles, 2);
+            brief_field(
+                ui,
+                "Architecture candidates",
+                &mut self.brief_draft.architecture_candidates,
+                2,
+            );
+            brief_field(ui, "Costs", &mut self.brief_draft.costs, 2);
+            brief_field(ui, "Risks", &mut self.brief_draft.risks, 2);
+            brief_field(
+                ui,
+                "Milestone plan",
+                &mut self.brief_draft.milestone_plan,
+                3,
+            );
+            ui.horizontal(|ui| {
+                if ui.button("Save new revision").clicked() {
+                    save = true;
+                }
+                if ui
+                    .add_enabled(
+                        latest > approved && !dirty && self.brief_draft.has_required_intake(),
+                        egui::Button::new(format!("Approve saved revision {latest}")),
+                    )
+                    .clicked()
+                {
+                    approve = true;
+                }
+            });
+            if dirty {
+                ui.label("Unsaved changes must be saved before approval.");
+            }
+            if !self.brief_draft.has_required_intake() {
+                ui.label("Approval requires idea, audience, problem, and desired outcome.");
+            }
+            if let Some(message) = &self.discovery_message {
+                ui.label(message);
+            }
+            if let Some(view) = &self.discovery {
+                if latest > 1 {
+                    ui.separator();
+                    ui.heading(format!("Changes in revision {latest}"));
+                    if view.changes.is_empty() {
+                        ui.label("No content changes from the prior revision.");
+                    }
+                    for change in &view.changes {
+                        ui.collapsing(change.field, |ui| {
+                            ui.label(format!("Before: {}", change.before));
+                            ui.label(format!("After: {}", change.after));
+                        });
+                    }
+                }
+                ui.separator();
+                ui.heading("Revision history");
+                for brief in view.briefs.iter().rev() {
+                    ui.label(format!(
+                        "Revision {} · {} · {}",
+                        brief.revision, brief.status, brief.created_at
+                    ));
+                }
+            }
+        });
+        if save {
+            self.save_brief();
+        }
+        if approve {
+            self.approve_brief();
+        }
+    }
+
+    fn research_workspace(&mut self, ui: &mut egui::Ui) {
+        let mut record = false;
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.heading("Research");
+            if self.selected_project.is_none() {
+                ui.label("Select a project first.");
+                return;
+            }
+            ui.checkbox(
+                &mut self.research_draft.is_hypothesis,
+                "Hypothesis (not yet verified)",
+            );
+            brief_field(ui, "Claim", &mut self.research_draft.claim, 2);
+            brief_field(ui, "Summary", &mut self.research_draft.summary, 3);
+            brief_field(
+                ui,
+                "Relevance to this product",
+                &mut self.research_draft.relevance,
+                2,
+            );
+            ui.label("Source URI or file path");
+            ui.text_edit_singleline(&mut self.research_draft.source_uri);
+            ui.label("Accessed date (YYYY-MM-DD)");
+            ui.text_edit_singleline(&mut self.research_draft.accessed_at);
+            egui::ComboBox::from_label("Confidence")
+                .selected_text(&self.research_draft.confidence)
+                .show_ui(ui, |ui| {
+                    for level in ["low", "medium", "high"] {
+                        ui.selectable_value(
+                            &mut self.research_draft.confidence,
+                            level.to_owned(),
+                            level,
+                        );
+                    }
+                });
+            if !self.research_draft.is_hypothesis {
+                ui.label("Sourced facts require a source and access date.");
+            }
+            if ui.button("Record finding").clicked() {
+                record = true;
+            }
+            if let Some(message) = &self.discovery_message {
+                ui.label(message);
+            }
+            ui.separator();
+            if let Some(view) = &self.discovery {
+                ui.heading(format!("Findings ({})", view.research.len()));
+                for finding in view.research.iter().rev() {
+                    ui.group(|ui| {
+                        ui.strong(format!(
+                            "{} · {}",
+                            if finding.input.is_hypothesis {
+                                "Hypothesis"
+                            } else {
+                                "Sourced fact"
+                            },
+                            finding.input.claim
+                        ));
+                        ui.label(&finding.input.summary);
+                        ui.label(format!("Relevance: {}", finding.input.relevance));
+                        ui.label(format!("Confidence: {}", finding.input.confidence));
+                        if !finding.input.source_uri.is_empty() {
+                            ui.label(format!(
+                                "Source: {} · accessed {}",
+                                finding.input.source_uri, finding.input.accessed_at
+                            ));
+                        }
+                    });
+                }
+            }
+        });
+        if record {
+            self.record_research();
+        }
+    }
+
     fn management(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             for (tab, name) in [
                 (Tab::Overview, "Overview"),
+                (Tab::Brief, "Brief"),
+                (Tab::Research, "Research"),
                 (Tab::Plan, "Plan"),
                 (Tab::Decisions, "Decisions"),
                 (Tab::Runs, "Runs"),
@@ -486,8 +797,10 @@ impl DesktopApp {
             }
             Tab::Plan => {
                 ui.heading("Plan");
-                ui.label("Brief and task planning are coming in the next milestones.");
+                ui.label("Task planning is coming in P09.");
             }
+            Tab::Brief => self.brief_workspace(ui),
+            Tab::Research => self.research_workspace(ui),
             Tab::Decisions => {
                 ui.heading("Decisions");
                 ui.label("The decision inbox is not connected yet.");
@@ -506,6 +819,15 @@ impl DesktopApp {
             }
         }
     }
+}
+
+fn brief_field(ui: &mut egui::Ui, label: &str, value: &mut String, rows: usize) {
+    ui.label(label);
+    ui.add(
+        egui::TextEdit::multiline(value)
+            .desired_rows(rows)
+            .desired_width(f32::INFINITY),
+    );
 }
 
 impl eframe::App for DesktopApp {

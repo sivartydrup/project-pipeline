@@ -1,12 +1,12 @@
 # Local storage, migrations, and recovery
 
-The app stores workflow metadata in one local SQLite database. Source code, large assets, and Git history remain in project folders. Schema v1 is in `crates/pipeline-store/migrations/001_initial.sql` and covers projects, briefs, research, milestones, epics, tasks, dependencies, criteria, decisions, approvals, runs, artifacts, test results, releases, and activity events. Schema v2 adds the detected Git root to each project. Existing v1 databases migrate with a pre-upgrade backup.
+The app stores workflow metadata in one local SQLite database. Source code, large assets, and Git history remain in project folders. Schema v1 is in `crates/pipeline-store/migrations/001_initial.sql` and covers projects, briefs, research, milestones, epics, tasks, dependencies, criteria, decisions, approvals, runs, artifacts, test results, releases, and activity events. Schema v2 adds the detected Git root to each project. Schema v3 records the approved brief revision and research summaries/relevance. Existing versioned databases migrate with a pre-upgrade backup.
 
 ## Mutation contract
 
 The `Store` service opens the connection with foreign keys enabled. `create_project` and `rename_project` write the project and its activity event in one transaction. The rename requires an expected revision and returns a conflict with the actual revision when stale. Activity rows have triggers blocking update and delete. The project foreign key on activity restricts project deletion; archiving is the intended workflow.
 
-Other entities currently have schema only. Their service methods will be added with the same transaction, revision, and audit pattern before agents can mutate them. Agents never get a raw database connection.
+Brief revisions, owner approval, and research findings also mutate through the `Store` service with a transaction and activity event. Brief approval references the exact revision and SHA-256 content hash. Saving a new revision leaves the last approval intact until the owner approves the new version. Sourced facts require a source URI and access date; hypotheses are explicitly marked. Remaining entities have schema only; their service methods will follow the same transaction, revision, and audit pattern. Agents never get a raw database connection.
 
 ## Migration behavior
 
@@ -16,4 +16,4 @@ Other entities currently have schema only. Their service methods will be added w
 
 `backup_to` uses SQLite's online backup API and rejects an existing destination. `restore_from` first opens the backup read-only, runs `PRAGMA integrity_check`, rejects a schema newer than this app, then restores through SQLite's backup API. The caller must hold exclusive ownership of the target database and should create a pre-restore backup. JSON export includes all workflow tables and schema version. No credential fields exist in v1; free-text redaction remains an API/release gate.
 
-The tested cases are: atomic mutation and stale revision, injected activity-write failure rollback, failed migration rollback, v1-to-v2 upgrade with pre-upgrade backup, file close/reopen, immutable activity event, and backup/restore/JSON round-trip. Large-database backup performance remains a release check.
+The tested cases are: atomic mutation and stale revision, injected activity-write failure rollback, failed migration rollback, versioned upgrades with pre-upgrade backup, file close/reopen, immutable activity event, backup/restore/JSON round-trip, exact brief approval, pending revision preservation, and research source enforcement. Large-database backup performance remains a release check.

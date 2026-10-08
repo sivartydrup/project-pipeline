@@ -3,6 +3,105 @@
 //! Domain validation and transitions belong here, independent of the UI,
 //! database, or agent harness.
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BriefContent {
+    pub idea: String,
+    pub audience: String,
+    pub problem: String,
+    pub desired_outcome: String,
+    pub constraints: String,
+    pub value_proposition: String,
+    pub scope: String,
+    pub non_goals: String,
+    pub user_journeys: String,
+    pub success_metrics: String,
+    pub ux_principles: String,
+    pub architecture_candidates: String,
+    pub costs: String,
+    pub risks: String,
+    pub milestone_plan: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BriefChange {
+    pub field: &'static str,
+    pub before: String,
+    pub after: String,
+}
+
+impl BriefContent {
+    pub fn changes_from(&self, previous: &Self) -> Vec<BriefChange> {
+        let fields = [
+            ("Idea", &previous.idea, &self.idea),
+            ("Audience", &previous.audience, &self.audience),
+            ("Problem", &previous.problem, &self.problem),
+            (
+                "Desired outcome",
+                &previous.desired_outcome,
+                &self.desired_outcome,
+            ),
+            ("Constraints", &previous.constraints, &self.constraints),
+            (
+                "Value proposition",
+                &previous.value_proposition,
+                &self.value_proposition,
+            ),
+            ("Scope", &previous.scope, &self.scope),
+            ("Non-goals", &previous.non_goals, &self.non_goals),
+            (
+                "User journeys",
+                &previous.user_journeys,
+                &self.user_journeys,
+            ),
+            (
+                "Success metrics",
+                &previous.success_metrics,
+                &self.success_metrics,
+            ),
+            (
+                "UX principles",
+                &previous.ux_principles,
+                &self.ux_principles,
+            ),
+            (
+                "Architecture candidates",
+                &previous.architecture_candidates,
+                &self.architecture_candidates,
+            ),
+            ("Costs", &previous.costs, &self.costs),
+            ("Risks", &previous.risks, &self.risks),
+            (
+                "Milestone plan",
+                &previous.milestone_plan,
+                &self.milestone_plan,
+            ),
+        ];
+        fields
+            .into_iter()
+            .filter(|(_, before, after)| before != after)
+            .map(|(field, before, after)| BriefChange {
+                field,
+                before: before.clone(),
+                after: after.clone(),
+            })
+            .collect()
+    }
+
+    pub fn has_required_intake(&self) -> bool {
+        [
+            self.idea.as_str(),
+            self.audience.as_str(),
+            self.problem.as_str(),
+            self.desired_outcome.as_str(),
+        ]
+        .into_iter()
+        .all(|value| !value.trim().is_empty())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectStage {
     Idea,

@@ -7,9 +7,13 @@ use serde_json::{Map, Value, json};
 use std::path::Path;
 use std::time::Duration;
 
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+mod discovery;
+pub use discovery::{BriefRecord, BriefStatus, ResearchInput, ResearchRecord};
+
+const CURRENT_SCHEMA_VERSION: i64 = 3;
 const INITIAL_SCHEMA: &str = include_str!("../migrations/001_initial.sql");
 const PROJECT_GIT_SCHEMA: &str = include_str!("../migrations/002_project_git.sql");
+const DISCOVERY_SCHEMA: &str = include_str!("../migrations/003_discovery.sql");
 const EXPORT_TABLES: &[&str] = &[
     "projects",
     "brief_revisions",
@@ -45,6 +49,20 @@ pub enum StoreError {
     },
     #[error("{0} must not be empty")]
     EmptyField(&'static str),
+    #[error("brief revision conflict for project {id}: expected {expected}, actual {actual}")]
+    BriefRevisionConflict {
+        id: String,
+        expected: i64,
+        actual: i64,
+    },
+    #[error("only the owner may approve a brief")]
+    ApprovalRequiresOwner,
+    #[error("brief requires an idea, audience, problem, and desired outcome before approval")]
+    IncompleteBrief,
+    #[error("brief revision is already approved")]
+    BriefAlreadyApproved,
+    #[error("sourced research requires a source URI and access date")]
+    MissingResearchSource,
     #[error("database schema {found} is newer than supported schema {supported}")]
     NewerSchema { found: i64, supported: i64 },
     #[error("backup destination already exists")]
@@ -392,6 +410,9 @@ fn migrate(connection: &mut Connection) -> Result<()> {
     if version < 2 {
         apply_migration(connection, 2, PROJECT_GIT_SCHEMA)?;
     }
+    if version < 3 {
+        apply_migration(connection, 3, DISCOVERY_SCHEMA)?;
+    }
     Ok(())
 }
 
@@ -479,7 +500,7 @@ mod tests {
         assert_eq!(restored.get_project("p1").unwrap().unwrap().name, "First");
         assert_eq!(restored.activity_count("p1").unwrap(), 1);
         let export: Value = serde_json::from_str(&restored.export_json().unwrap()).unwrap();
-        assert_eq!(export["schema_version"], 2);
+        assert_eq!(export["schema_version"], 3);
         assert_eq!(export["tables"]["projects"][0]["id"], "p1");
         assert_eq!(
             export["tables"]["activity_events"][0]["operation"],
@@ -558,7 +579,7 @@ mod tests {
             .unwrap();
         drop(connection);
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 2);
+        assert_eq!(store.schema_version().unwrap(), 3);
         assert_eq!(store.get_project("p1").unwrap().unwrap().git_root, None);
         let backup = Connection::open(path.with_extension("pre-v1.sqlite")).unwrap();
         let version: i64 = backup
