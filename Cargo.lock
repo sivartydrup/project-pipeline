@@ -2269,6 +2269,7 @@ dependencies = [
  "pipeline-terminal",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -2292,6 +2293,7 @@ dependencies = [
  "dunce",
  "pipeline-domain",
  "pipeline-store",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "uuid",

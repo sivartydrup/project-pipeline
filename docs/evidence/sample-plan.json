@@ -1,0 +1,106 @@
+{
+  "content_hash": "b78ac4745e8257fe8a78f63f85ce6eab9b431ca924f85d5f62b5fe2aaa9c9898",
+  "plan": {
+    "dependencies": [
+      {
+        "from_task_id": "review-flow",
+        "kind": "blocks",
+        "to_task_id": "desktop-shell"
+      }
+    ],
+    "epics": [
+      {
+        "id": "launch-app",
+        "outcome": "A testable release candidate",
+        "title": "Launch the app"
+      }
+    ],
+    "tasks": [
+      {
+        "context_links": [],
+        "criteria": [
+          {
+            "assertion": "Build desktop shell passes its review",
+            "id": "desktop-shell-check",
+            "required_evidence": [
+              "test-log"
+            ],
+            "verifier": "owner"
+          }
+        ],
+        "deliverables": [
+          "Build desktop shell implementation"
+        ],
+        "epic_id": "launch-app",
+        "estimate_band": "small",
+        "id": "desktop-shell",
+        "outcome": "Build desktop shell is verified",
+        "owner_decision_triggers": [],
+        "risk": "low",
+        "title": "Build desktop shell",
+        "verification_commands": [
+          "cargo test --workspace"
+        ],
+        "weight": 2
+      },
+      {
+        "context_links": [],
+        "criteria": [
+          {
+            "assertion": "Build review flow passes its review",
+            "id": "review-flow-check",
+            "required_evidence": [
+              "test-log"
+            ],
+            "verifier": "owner"
+          }
+        ],
+        "deliverables": [
+          "Build review flow implementation"
+        ],
+        "epic_id": "launch-app",
+        "estimate_band": "small",
+        "id": "review-flow",
+        "outcome": "Build review flow is verified",
+        "owner_decision_triggers": [],
+        "risk": "low",
+        "title": "Build review flow",
+        "verification_commands": [
+          "cargo test --workspace"
+        ],
+        "weight": 3
+      }
+    ]
+  },
+  "plan_revision": 1,
+  "project_id": "sample-project",
+  "scope_revision": 1,
+  "tasks": [
+    {
+      "criteria": [
+        {
+          "evidence": {
+            "test-log": "artifact://sample-shell-check"
+          },
+          "logical_id": "desktop-shell-check",
+          "verified_by": "owner"
+        }
+      ],
+      "logical_id": "desktop-shell",
+      "status": "accepted",
+      "weight": 2
+    },
+    {
+      "criteria": [
+        {
+          "evidence": {},
+          "logical_id": "review-flow-check",
+          "verified_by": null
+        }
+      ],
+      "logical_id": "review-flow",
+      "status": "ready",
+      "weight": 3
+    }
+  ]
+}

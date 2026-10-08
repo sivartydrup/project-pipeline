@@ -1,9 +1,14 @@
 use eframe::egui;
-use pipeline_engine::{BriefContent, DiscoveryView, ProjectEngine, ProjectOverview, ResearchInput};
+use pipeline_engine::{
+    BriefContent, CriterionSpec, DependencyKind, DependencySpec, DiscoveryView, EpicSpec,
+    PlanContent, PlanView, ProjectEngine, ProjectOverview, ResearchInput, TaskSpec,
+};
 use pipeline_terminal::TerminalSession;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
@@ -48,6 +53,14 @@ enum Tab {
     About,
 }
 
+enum PlanAction {
+    Save,
+    Approve,
+    Submit(String, i64),
+    Verify(String, String, i64, BTreeMap<String, String>),
+    Accept(String, i64),
+}
+
 struct DesktopApp {
     data_dir: Option<PathBuf>,
     engine: Option<ProjectEngine>,
@@ -62,6 +75,13 @@ struct DesktopApp {
     brief_draft: BriefContent,
     research_draft: ResearchInput,
     discovery_message: Option<String>,
+    plan: Option<PlanView>,
+    plan_draft: PlanContent,
+    plan_message: Option<String>,
+    evidence_drafts: BTreeMap<String, BTreeMap<String, String>>,
+    new_dependency_from: String,
+    new_dependency_to: String,
+    new_dependency_kind: DependencyKind,
     show_portfolio: bool,
     show_terminal: bool,
     portfolio_width: f32,
@@ -104,6 +124,13 @@ impl Default for DesktopApp {
                 ..Default::default()
             },
             discovery_message: None,
+            plan: None,
+            plan_draft: PlanContent::default(),
+            plan_message: None,
+            evidence_drafts: BTreeMap::new(),
+            new_dependency_from: String::new(),
+            new_dependency_to: String::new(),
+            new_dependency_kind: DependencyKind::Blocks,
             show_portfolio: prefs.show_portfolio,
             show_terminal: prefs.show_terminal,
             portfolio_width: prefs.portfolio_width.clamp(200.0, 700.0),
@@ -144,6 +171,15 @@ impl Default for DesktopApp {
                                 }
                                 Err(error) => {
                                     app.message = Some(format!("Unable to load brief: {error}"))
+                                }
+                            }
+                            match engine.load_plan(project_id) {
+                                Ok(view) => {
+                                    app.plan_draft = view.latest_content();
+                                    app.plan = Some(view);
+                                }
+                                Err(error) => {
+                                    app.message = Some(format!("Unable to load plan: {error}"))
                                 }
                             }
                         }
@@ -204,6 +240,7 @@ impl DesktopApp {
                 self.import_path.clear();
                 self.import_name.clear();
                 self.refresh_discovery();
+                self.refresh_plan();
             }
             Err(error) => self.message = Some(error.to_string()),
         }
@@ -278,6 +315,7 @@ impl DesktopApp {
             .map(|tab| tab.id);
         self.terminal_message = None;
         self.refresh_discovery();
+        self.refresh_plan();
     }
 
     fn refresh_discovery(&mut self) {
@@ -296,6 +334,72 @@ impl DesktopApp {
                 self.discovery_message = None;
             }
             Err(error) => self.discovery_message = Some(error.to_string()),
+        }
+    }
+
+    fn refresh_plan(&mut self) {
+        let Some(project_id) = &self.selected_project else {
+            self.plan = None;
+            self.plan_draft = PlanContent::default();
+            return;
+        };
+        let Some(engine) = &self.engine else {
+            return;
+        };
+        match engine.load_plan(project_id) {
+            Ok(view) => {
+                self.plan_draft = view.latest_content();
+                self.plan = Some(view);
+                self.plan_message = None;
+                self.evidence_drafts.clear();
+                self.new_dependency_from.clear();
+                self.new_dependency_to.clear();
+            }
+            Err(error) => self.plan_message = Some(error.to_string()),
+        }
+    }
+
+    fn run_plan_action(&mut self, action: PlanAction) {
+        let (Some(engine), Some(project_id)) =
+            (self.engine.as_mut(), self.selected_project.as_deref())
+        else {
+            return;
+        };
+        let result = match action {
+            PlanAction::Save => {
+                let expected = self.plan.as_ref().map_or(0, PlanView::latest_revision);
+                engine
+                    .save_plan(project_id, expected, &self.plan_draft)
+                    .map(|view| (view, format!("Saved plan revision {}", expected + 1), true))
+            }
+            PlanAction::Approve => {
+                let expected = self.plan.as_ref().map_or(0, PlanView::latest_revision);
+                engine
+                    .approve_latest_plan(project_id, expected)
+                    .map(|view| (view, format!("Approved plan revision {expected}"), true))
+            }
+            PlanAction::Submit(id, revision) => engine
+                .submit_task_for_review(project_id, &id, revision)
+                .map(|view| (view, "Task submitted for review".to_owned(), false)),
+            PlanAction::Verify(task_id, criterion_id, revision, evidence) => engine
+                .verify_criterion(project_id, &task_id, &criterion_id, revision, &evidence)
+                .map(|view| (view, "Criterion verified with evidence".to_owned(), false)),
+            PlanAction::Accept(id, revision) => engine
+                .accept_task(project_id, &id, revision)
+                .map(|view| (view, "Task accepted".to_owned(), false)),
+        };
+        match result {
+            Ok((view, message, reset_draft)) => {
+                if reset_draft {
+                    self.plan_draft = view.latest_content();
+                }
+                self.plan = Some(view);
+                self.plan_message = Some(message);
+                if let Ok(projects) = engine.list_overviews() {
+                    self.projects = projects;
+                }
+            }
+            Err(error) => self.plan_message = Some(error.to_string()),
         }
     }
 
@@ -748,6 +852,444 @@ impl DesktopApp {
         }
     }
 
+    fn plan_workspace(&mut self, ui: &mut egui::Ui) {
+        let latest = self.plan.as_ref().map_or(0, PlanView::latest_revision);
+        let active_scope = self
+            .plan
+            .as_ref()
+            .map_or(0, |view| view.active_scope_revision);
+        let dirty = self
+            .plan
+            .as_ref()
+            .is_some_and(|view| self.plan_draft != view.latest_content());
+        let brief_approved = self.discovery.as_ref().is_some_and(|view| {
+            view.approved_revision > 0 && view.latest_revision() == view.approved_revision
+        });
+        let pending = self
+            .plan
+            .as_ref()
+            .is_some_and(PlanView::has_pending_revision);
+        let snapshot = self.plan.as_ref();
+        let mut action = None;
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.heading("Task plan");
+            if self.selected_project.is_none() {
+                ui.label("Select a project first.");
+                return;
+            }
+            ui.label(format!(
+                "Latest plan revision: {latest} · Active approved scope: {active_scope}"
+            ));
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(
+                        latest == 0 || dirty,
+                        egui::Button::new("Save plan revision"),
+                    )
+                    .clicked()
+                {
+                    action = Some(PlanAction::Save);
+                }
+                if ui
+                    .add_enabled(
+                        brief_approved && pending && !dirty && self.plan_draft.validate().is_ok(),
+                        egui::Button::new(format!("Approve revision {latest} as new scope")),
+                    )
+                    .clicked()
+                {
+                    action = Some(PlanAction::Approve);
+                }
+            });
+            if !brief_approved && pending {
+                ui.label("Approve the latest product brief before approving the task plan.");
+            }
+            if dirty {
+                ui.label("Save changes before approval.");
+            }
+            if let Err(error) = self.plan_draft.validate() {
+                ui.label(format!("Plan needs work before approval: {error}"));
+            }
+            if let Some(message) = &self.plan_message {
+                ui.label(message);
+            }
+            if let Some(view) = &snapshot {
+                let accepted = view
+                    .active_tasks
+                    .iter()
+                    .filter(|task| task.status == "accepted")
+                    .count();
+                let runnable = view
+                    .active_tasks
+                    .iter()
+                    .filter(|task| task.status == "ready" && task.unresolved_blockers.is_empty())
+                    .count();
+                ui.label(format!(
+                    "Active scope: {accepted}/{} tasks accepted · {runnable} ready without blockers",
+                    view.active_tasks.len()
+                ));
+                if view.has_pending_revision() {
+                    ui.strong("A draft plan is awaiting review; current completion still uses the approved scope.");
+                }
+                if view.revisions.len() > 1 {
+                    for summary in plan_changes(
+                        &view.revisions[view.revisions.len() - 2].content,
+                        &view.latest_content(),
+                    ) {
+                        ui.label(summary);
+                    }
+                }
+            }
+            ui.separator();
+            ui.heading("Epics");
+            if ui.button("+ Add epic").clicked() {
+                self.plan_draft.epics.push(EpicSpec {
+                    id: Uuid::new_v4().to_string(),
+                    title: String::new(),
+                    outcome: String::new(),
+                });
+            }
+            let mut remove_epic = None;
+            for (index, epic) in self.plan_draft.epics.iter_mut().enumerate() {
+                ui.group(|ui| {
+                    ui.label(format!("Epic {}", index + 1));
+                    ui.text_edit_singleline(&mut epic.title);
+                    brief_field(ui, "Outcome", &mut epic.outcome, 2);
+                    if ui.button("Remove epic").clicked() {
+                        remove_epic = Some(index);
+                    }
+                });
+            }
+            if let Some(index) = remove_epic {
+                let removed = self.plan_draft.epics.remove(index);
+                for task in &mut self.plan_draft.tasks {
+                    if task.epic_id.as_deref() == Some(&removed.id) {
+                        task.epic_id = None;
+                    }
+                }
+            }
+            ui.separator();
+            ui.heading("Tasks");
+            if ui.button("+ Add task").clicked() {
+                self.plan_draft.tasks.push(TaskSpec {
+                    id: Uuid::new_v4().to_string(),
+                    epic_id: None,
+                    title: String::new(),
+                    outcome: String::new(),
+                    weight: 1,
+                    risk: "low".to_owned(),
+                    criteria: vec![CriterionSpec {
+                        id: Uuid::new_v4().to_string(),
+                        assertion: String::new(),
+                        verifier: "owner".to_owned(),
+                        required_evidence: vec!["test-log".to_owned()],
+                    }],
+                    verification_commands: Vec::new(),
+                    deliverables: Vec::new(),
+                    context_links: Vec::new(),
+                    estimate_band: String::new(),
+                    owner_decision_triggers: Vec::new(),
+                });
+            }
+            let epic_choices: Vec<_> = self
+                .plan_draft
+                .epics
+                .iter()
+                .map(|epic| (epic.id.clone(), epic.title.clone()))
+                .collect();
+            let mut remove_task = None;
+            for (index, task) in self.plan_draft.tasks.iter_mut().enumerate() {
+                let label = if task.title.trim().is_empty() {
+                    format!("Task {} · untitled", index + 1)
+                } else {
+                    format!("Task {} · {}", index + 1, task.title)
+                };
+                egui::CollapsingHeader::new(label)
+                    .id_salt(&task.id)
+                    .show(ui, |ui| {
+                        ui.label("Title");
+                        ui.text_edit_singleline(&mut task.title);
+                        brief_field(ui, "Desired outcome", &mut task.outcome, 2);
+                        ui.horizontal(|ui| {
+                            ui.label("Weight");
+                            ui.add(egui::DragValue::new(&mut task.weight).range(1..=10_000));
+                            ui.label("Risk");
+                            ui.text_edit_singleline(&mut task.risk);
+                        });
+                        egui::ComboBox::from_id_salt(("task-epic", &task.id))
+                            .selected_text(
+                                epic_choices
+                                    .iter()
+                                    .find(|(id, _)| task.epic_id.as_deref() == Some(id))
+                                    .map_or("No epic", |(_, title)| title.as_str()),
+                            )
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut task.epic_id, None, "No epic");
+                                for (id, title) in &epic_choices {
+                                    ui.selectable_value(&mut task.epic_id, Some(id.clone()), title);
+                                }
+                            });
+                        plan_lines(ui, "Verification commands", &mut task.verification_commands);
+                        plan_lines(ui, "Deliverables", &mut task.deliverables);
+                        plan_lines(ui, "Context links", &mut task.context_links);
+                        ui.label("Estimate band");
+                        ui.text_edit_singleline(&mut task.estimate_band);
+                        plan_lines(
+                            ui,
+                            "Owner decision triggers",
+                            &mut task.owner_decision_triggers,
+                        );
+                        ui.label("Acceptance criteria");
+                        if ui.button("+ Add criterion").clicked() {
+                            task.criteria.push(CriterionSpec {
+                                id: Uuid::new_v4().to_string(),
+                                assertion: String::new(),
+                                verifier: "owner".to_owned(),
+                                required_evidence: vec!["test-log".to_owned()],
+                            });
+                        }
+                        let mut remove_criterion = None;
+                        for (criterion_index, criterion) in task.criteria.iter_mut().enumerate() {
+                            ui.group(|ui| {
+                                ui.label(format!("Criterion {}", criterion_index + 1));
+                                brief_field(ui, "Assertion", &mut criterion.assertion, 2);
+                                ui.label("Verifier");
+                                ui.text_edit_singleline(&mut criterion.verifier);
+                                plan_lines(
+                                    ui,
+                                    "Required evidence kinds",
+                                    &mut criterion.required_evidence,
+                                );
+                                if ui.button("Remove criterion").clicked() {
+                                    remove_criterion = Some(criterion_index);
+                                }
+                            });
+                        }
+                        if let Some(criterion_index) = remove_criterion {
+                            task.criteria.remove(criterion_index);
+                        }
+                        if ui.button("Remove task").clicked() {
+                            remove_task = Some(index);
+                        }
+                    });
+            }
+            if let Some(index) = remove_task {
+                let removed = self.plan_draft.tasks.remove(index);
+                self.plan_draft.dependencies.retain(|edge| {
+                    edge.from_task_id != removed.id && edge.to_task_id != removed.id
+                });
+            }
+            ui.separator();
+            ui.heading("Dependencies");
+            ui.label("A blocking edge means the first task waits for the prerequisite.");
+            let task_choices: Vec<_> = self
+                .plan_draft
+                .tasks
+                .iter()
+                .map(|task| (task.id.clone(), task.title.clone()))
+                .collect();
+            if !task_choices
+                .iter()
+                .any(|(id, _)| id == &self.new_dependency_from)
+            {
+                self.new_dependency_from =
+                    task_choices.first().map_or(String::new(), |t| t.0.clone());
+            }
+            if !task_choices
+                .iter()
+                .any(|(id, _)| id == &self.new_dependency_to)
+            {
+                self.new_dependency_to = task_choices.get(1).map_or(String::new(), |t| t.0.clone());
+            }
+            ui.horizontal_wrapped(|ui| {
+                task_choice(
+                    ui,
+                    "Dependent task",
+                    &mut self.new_dependency_from,
+                    &task_choices,
+                );
+                ui.label("waits for");
+                task_choice(
+                    ui,
+                    "Prerequisite",
+                    &mut self.new_dependency_to,
+                    &task_choices,
+                );
+                egui::ComboBox::from_id_salt("new-dependency-kind")
+                    .selected_text(self.new_dependency_kind.as_str())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.new_dependency_kind,
+                            DependencyKind::Blocks,
+                            "blocks",
+                        );
+                        ui.selectable_value(
+                            &mut self.new_dependency_kind,
+                            DependencyKind::Informs,
+                            "informs",
+                        );
+                    });
+                if ui.button("Add edge").clicked()
+                    && !self.new_dependency_from.is_empty()
+                    && !self.new_dependency_to.is_empty()
+                {
+                    self.plan_draft.dependencies.push(DependencySpec {
+                        from_task_id: self.new_dependency_from.clone(),
+                        to_task_id: self.new_dependency_to.clone(),
+                        kind: self.new_dependency_kind,
+                    });
+                }
+            });
+            let mut remove_edge = None;
+            for (index, edge) in self.plan_draft.dependencies.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(format!(
+                        "{} {} {}",
+                        task_title(&task_choices, &edge.from_task_id),
+                        edge.kind.as_str(),
+                        task_title(&task_choices, &edge.to_task_id)
+                    ));
+                    if ui.button("Remove").clicked() {
+                        remove_edge = Some(index);
+                    }
+                });
+            }
+            if let Some(index) = remove_edge {
+                self.plan_draft.dependencies.remove(index);
+            }
+            if let Some(view) = &snapshot {
+                ui.separator();
+                ui.heading("Plan review");
+                if view.revisions.len() > 1 {
+                    for summary in plan_changes(
+                        &view.revisions[view.revisions.len() - 2].content,
+                        &view.latest_content(),
+                    ) {
+                        ui.label(summary);
+                    }
+                }
+                for revision in view.revisions.iter().rev() {
+                    egui::CollapsingHeader::new(format!(
+                        "Revision {} · {} · scope {} · {}",
+                        revision.revision,
+                        revision.status,
+                        revision
+                            .scope_revision
+                            .map_or("—".to_owned(), |scope| scope.to_string()),
+                        revision.created_at
+                    ))
+                    .id_salt(&revision.id)
+                    .show(ui, |ui| {
+                        ui.label(format!("Content hash: {}", revision.content_hash));
+                        for epic in &revision.content.epics {
+                            ui.label(format!("Epic: {} — {}", epic.title, epic.outcome));
+                        }
+                        for task in &revision.content.tasks {
+                            ui.strong(format!("Task: {} · weight {}", task.title, task.weight));
+                            ui.label(format!("Outcome: {}", task.outcome));
+                            for criterion in &task.criteria {
+                                ui.label(format!(
+                                    "Criterion: {} · evidence: {}",
+                                    criterion.assertion,
+                                    criterion.required_evidence.join(", ")
+                                ));
+                            }
+                        }
+                        for edge in &revision.content.dependencies {
+                            let choices: Vec<_> = revision
+                                .content
+                                .tasks
+                                .iter()
+                                .map(|task| (task.id.clone(), task.title.clone()))
+                                .collect();
+                            ui.label(format!(
+                                "{} {} {}",
+                                task_title(&choices, &edge.from_task_id),
+                                edge.kind.as_str(),
+                                task_title(&choices, &edge.to_task_id)
+                            ));
+                        }
+                    });
+                }
+                ui.separator();
+                ui.heading("Active scope tasks");
+                for task in &view.active_tasks {
+                    ui.group(|ui| {
+                        ui.strong(format!(
+                            "{} · {} · weight {}",
+                            task.title, task.status, task.weight
+                        ));
+                        ui.label(&task.outcome);
+                        if !task.unresolved_blockers.is_empty() {
+                            ui.label(format!(
+                                "Waiting for: {}",
+                                task.unresolved_blockers.join(", ")
+                            ));
+                        }
+                        if task.status == "ready"
+                            && task.unresolved_blockers.is_empty()
+                            && ui.button("Submit for review").clicked()
+                        {
+                            action =
+                                Some(PlanAction::Submit(task.logical_id.clone(), task.revision));
+                        }
+                        for criterion in &task.criteria {
+                            ui.label(format!(
+                                "Criterion: {} · verifier: {}",
+                                criterion.assertion, criterion.verifier
+                            ));
+                            if criterion.accepted_at.is_some() {
+                                ui.label(format!(
+                                    "Verified by {}",
+                                    criterion.verified_by.as_deref().unwrap_or("unknown")
+                                ));
+                                for (kind, reference) in &criterion.evidence {
+                                    ui.label(format!("{kind}: {reference}"));
+                                }
+                            } else if task.status == "review" {
+                                let evidence = self
+                                    .evidence_drafts
+                                    .entry(criterion.logical_id.clone())
+                                    .or_insert_with(|| criterion.evidence.clone());
+                                for kind in &criterion.required_evidence {
+                                    ui.horizontal(|ui| {
+                                        ui.label(kind);
+                                        ui.text_edit_singleline(
+                                            evidence.entry(kind.clone()).or_default(),
+                                        );
+                                    });
+                                }
+                                if ui
+                                    .button(format!("Verify criterion {}", criterion.assertion))
+                                    .clicked()
+                                {
+                                    action = Some(PlanAction::Verify(
+                                        task.logical_id.clone(),
+                                        criterion.logical_id.clone(),
+                                        task.revision,
+                                        evidence.clone(),
+                                    ));
+                                }
+                            }
+                        }
+                        if task.status == "review"
+                            && task
+                                .criteria
+                                .iter()
+                                .all(|criterion| criterion.accepted_at.is_some())
+                            && ui.button("Accept task").clicked()
+                        {
+                            action =
+                                Some(PlanAction::Accept(task.logical_id.clone(), task.revision));
+                        }
+                    });
+                }
+            }
+        });
+        if let Some(action) = action {
+            self.run_plan_action(action);
+        }
+    }
+
     fn management(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             for (tab, name) in [
@@ -796,8 +1338,7 @@ impl DesktopApp {
                 }
             }
             Tab::Plan => {
-                ui.heading("Plan");
-                ui.label("Task planning is coming in P09.");
+                self.plan_workspace(ui);
             }
             Tab::Brief => self.brief_workspace(ui),
             Tab::Research => self.research_workspace(ui),
@@ -828,6 +1369,192 @@ fn brief_field(ui: &mut egui::Ui, label: &str, value: &mut String, rows: usize) 
             .desired_rows(rows)
             .desired_width(f32::INFINITY),
     );
+}
+
+fn plan_lines(ui: &mut egui::Ui, label: &str, values: &mut Vec<String>) {
+    ui.label(label);
+    let mut remove = None;
+    for (index, value) in values.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.text_edit_singleline(value);
+            if ui.button("Remove").clicked() {
+                remove = Some(index);
+            }
+        });
+    }
+    if let Some(index) = remove {
+        values.remove(index);
+    }
+    if ui.button(format!("+ Add {label}")).clicked() {
+        values.push(String::new());
+    }
+}
+
+fn task_title<'a>(choices: &'a [(String, String)], id: &'a str) -> &'a str {
+    choices
+        .iter()
+        .find(|(candidate, _)| candidate == id)
+        .map_or(id, |(_, title)| title.as_str())
+}
+
+fn task_choice(
+    ui: &mut egui::Ui,
+    label: &str,
+    selected: &mut String,
+    choices: &[(String, String)],
+) {
+    egui::ComboBox::from_id_salt(label)
+        .selected_text(task_title(choices, selected))
+        .show_ui(ui, |ui| {
+            for (id, title) in choices {
+                ui.selectable_value(selected, id.clone(), title);
+            }
+        });
+}
+
+fn plan_changes(before: &PlanContent, after: &PlanContent) -> Vec<String> {
+    let mut changes = Vec::new();
+    for epic in &after.epics {
+        match before.epics.iter().find(|old| old.id == epic.id) {
+            None => changes.push(format!("Added epic: {}", epic.title)),
+            Some(old) if old != epic => {
+                changes.push(format!(
+                    "Changed epic: {} → {}; outcome: {} → {}",
+                    old.title, epic.title, old.outcome, epic.outcome
+                ));
+            }
+            _ => {}
+        }
+    }
+    for epic in &before.epics {
+        if !after.epics.iter().any(|new| new.id == epic.id) {
+            changes.push(format!("Removed epic: {}", epic.title));
+        }
+    }
+    for task in &after.tasks {
+        match before.tasks.iter().find(|old| old.id == task.id) {
+            None => changes.push(format!("Added task: {}", task.title)),
+            Some(old) if old != task => {
+                for (field, from, to) in [
+                    ("title", old.title.as_str(), task.title.as_str()),
+                    ("outcome", old.outcome.as_str(), task.outcome.as_str()),
+                    ("risk", old.risk.as_str(), task.risk.as_str()),
+                    (
+                        "estimate",
+                        old.estimate_band.as_str(),
+                        task.estimate_band.as_str(),
+                    ),
+                ] {
+                    if from != to {
+                        changes.push(format!("{} {field}: {from} → {to}", task.title));
+                    }
+                }
+                if old.weight != task.weight {
+                    changes.push(format!(
+                        "{} weight: {} → {}",
+                        task.title, old.weight, task.weight
+                    ));
+                }
+                if old.epic_id != task.epic_id {
+                    changes.push(format!("{} epic assignment changed", task.title));
+                }
+                for (field, from, to) in [
+                    (
+                        "verification commands",
+                        &old.verification_commands,
+                        &task.verification_commands,
+                    ),
+                    ("deliverables", &old.deliverables, &task.deliverables),
+                    ("context links", &old.context_links, &task.context_links),
+                    (
+                        "owner decision triggers",
+                        &old.owner_decision_triggers,
+                        &task.owner_decision_triggers,
+                    ),
+                ] {
+                    if from != to {
+                        changes.push(format!(
+                            "{} {field}: {} → {}",
+                            task.title,
+                            from.join(", "),
+                            to.join(", ")
+                        ));
+                    }
+                }
+                for criterion in &task.criteria {
+                    match old.criteria.iter().find(|prior| prior.id == criterion.id) {
+                        None => changes.push(format!(
+                            "{} added criterion: {}",
+                            task.title, criterion.assertion
+                        )),
+                        Some(prior) if prior != criterion => changes.push(format!(
+                            "{} criterion: {} [{}] → {} [{}]",
+                            task.title,
+                            prior.assertion,
+                            prior.required_evidence.join(", "),
+                            criterion.assertion,
+                            criterion.required_evidence.join(", ")
+                        )),
+                        _ => {}
+                    }
+                }
+                for criterion in &old.criteria {
+                    if !task.criteria.iter().any(|new| new.id == criterion.id) {
+                        changes.push(format!(
+                            "{} removed criterion: {}",
+                            task.title, criterion.assertion
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for task in &before.tasks {
+        if !after.tasks.iter().any(|new| new.id == task.id) {
+            changes.push(format!("Removed task: {}", task.title));
+        }
+    }
+    for edge in &after.dependencies {
+        if !before.dependencies.contains(edge) {
+            changes.push(format!(
+                "Added {} edge: {} → {}",
+                edge.kind.as_str(),
+                after
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == edge.from_task_id)
+                    .map_or(edge.from_task_id.as_str(), |task| task.title.as_str()),
+                after
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == edge.to_task_id)
+                    .map_or(edge.to_task_id.as_str(), |task| task.title.as_str())
+            ));
+        }
+    }
+    for edge in &before.dependencies {
+        if !after.dependencies.contains(edge) {
+            changes.push(format!(
+                "Removed {} edge: {} → {}",
+                edge.kind.as_str(),
+                before
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == edge.from_task_id)
+                    .map_or(edge.from_task_id.as_str(), |task| task.title.as_str()),
+                before
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == edge.to_task_id)
+                    .map_or(edge.to_task_id.as_str(), |task| task.title.as_str())
+            ));
+        }
+    }
+    if changes.is_empty() {
+        changes.push("No plan content changes from the prior revision.".to_owned());
+    }
+    changes
 }
 
 impl eframe::App for DesktopApp {

@@ -17,6 +17,7 @@ Status values: **confirmed requirement**, **proposed**, **approved**, **rejected
 | D-011 | approved implementation sequencing | Configure three-OS CI in P04, but require actual Windows/macOS/Linux CI execution in P19 once this project has its own remote. | The current folder was nested inside an unrelated Git repository; this preserves the cross-platform release gate without blocking local implementation. |
 | D-012 | approved implementation choice | Use `portable-pty` with `vt100` parsing and a bounded reader queue for the first terminal integration. | The Windows PTY spike validated these libraries. UI frames process a limited output budget; a richer terminal renderer can build on the same session boundary. |
 | D-013 | approved implementation choice | Store briefs as immutable structured revisions; bind owner approval to a revision and SHA-256 content hash. | New edits stay pending while the previously approved revision remains identifiable. Field-level deltas and transactional activity events make the review trail explicit. |
+| D-014 | approved implementation choice | Store each task plan as an immutable structured revision and materialize tasks into a new scope only on owner approval of the plan, after the latest brief is approved. | Draft edits leave active completion unchanged. An accepted task carries into the next scope only when its definition and blocking prerequisites are unchanged; changed work must be reviewed again. |
 
 ## Baseline approval
 

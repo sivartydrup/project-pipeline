@@ -374,7 +374,7 @@ fn content_hash(content_json: &str) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn insert_event(
+pub(crate) fn insert_event(
     connection: &Connection,
     project_id: &str,
     actor: &str,

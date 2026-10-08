@@ -1,9 +1,13 @@
 //! Application services for local projects. UI and agents use this boundary.
 
-pub use pipeline_domain::{BriefChange, BriefContent};
+pub use pipeline_domain::{
+    BriefChange, BriefContent, CriterionSpec, DependencyKind, DependencySpec, EpicSpec,
+    PlanContent, PlanError, TaskSpec,
+};
 use pipeline_domain::{ProjectHealth, ProjectStage};
-pub use pipeline_store::{BriefRecord, ResearchInput, ResearchRecord};
+pub use pipeline_store::{BriefRecord, PlanRecord, ResearchInput, ResearchRecord, TaskRecord};
 use pipeline_store::{Store, StoreError};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 use uuid::Uuid;
@@ -45,6 +49,33 @@ pub struct DiscoveryView {
     pub research: Vec<ResearchRecord>,
     pub approved_revision: i64,
     pub changes: Vec<BriefChange>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlanView {
+    pub revisions: Vec<PlanRecord>,
+    pub active_scope_revision: i64,
+    pub active_tasks: Vec<TaskRecord>,
+}
+
+impl PlanView {
+    pub fn latest_revision(&self) -> i64 {
+        self.revisions
+            .last()
+            .map_or(0, |revision| revision.revision)
+    }
+
+    pub fn latest_content(&self) -> PlanContent {
+        self.revisions
+            .last()
+            .map_or_else(PlanContent::default, |revision| revision.content.clone())
+    }
+
+    pub fn has_pending_revision(&self) -> bool {
+        self.revisions
+            .last()
+            .is_some_and(|revision| revision.status == "draft")
+    }
 }
 
 impl DiscoveryView {
@@ -133,12 +164,18 @@ impl ProjectEngine {
             .map(|record| {
                 let metrics = self.store.project_metrics(&record.id)?;
                 let brief = self.store.brief_status(&record.id)?;
+                let plans = self.store.list_plan_revisions(&record.id)?;
                 let next_owner_action = if metrics.blocked_count > 0 {
                     format!("Resolve {} blocked task(s)", metrics.blocked_count)
                 } else if brief.latest_revision > brief.approved_revision {
                     format!("Review brief revision {}", brief.latest_revision)
                 } else if brief.approved_revision == 0 {
                     "Write and approve a project brief".to_owned()
+                } else if plans.last().is_some_and(|plan| plan.status == "draft") {
+                    format!(
+                        "Review task plan revision {}",
+                        plans.last().unwrap().revision
+                    )
                 } else if record.active_scope_revision == 0 {
                     "Review and approve the task plan".to_owned()
                 } else {
@@ -230,6 +267,103 @@ impl ProjectEngine {
             &Uuid::new_v4().to_string(),
         )?;
         self.load_discovery(project_id)
+    }
+
+    pub fn load_plan(&self, project_id: &str) -> Result<PlanView> {
+        let status = self.store.plan_status(project_id)?;
+        Ok(PlanView {
+            revisions: self.store.list_plan_revisions(project_id)?,
+            active_scope_revision: status.active_scope_revision,
+            active_tasks: self.store.list_active_tasks(project_id)?,
+        })
+    }
+
+    pub fn save_plan(
+        &mut self,
+        project_id: &str,
+        expected_latest_revision: i64,
+        content: &PlanContent,
+    ) -> Result<PlanView> {
+        self.store.save_plan_revision(
+            &Uuid::new_v4().to_string(),
+            project_id,
+            expected_latest_revision,
+            content,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?;
+        self.load_plan(project_id)
+    }
+
+    pub fn approve_latest_plan(
+        &mut self,
+        project_id: &str,
+        expected_latest_revision: i64,
+    ) -> Result<PlanView> {
+        self.store.approve_plan_revision(
+            project_id,
+            expected_latest_revision,
+            &Uuid::new_v4().to_string(),
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?;
+        self.load_plan(project_id)
+    }
+
+    pub fn submit_task_for_review(
+        &mut self,
+        project_id: &str,
+        logical_id: &str,
+        expected_revision: i64,
+    ) -> Result<PlanView> {
+        self.store.submit_task_for_review(
+            project_id,
+            logical_id,
+            expected_revision,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?;
+        self.load_plan(project_id)
+    }
+
+    pub fn verify_criterion(
+        &mut self,
+        project_id: &str,
+        task_id: &str,
+        criterion_id: &str,
+        expected_task_revision: i64,
+        evidence: &BTreeMap<String, String>,
+    ) -> Result<PlanView> {
+        self.store.verify_criterion(
+            project_id,
+            task_id,
+            criterion_id,
+            expected_task_revision,
+            evidence,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?;
+        self.load_plan(project_id)
+    }
+
+    pub fn accept_task(
+        &mut self,
+        project_id: &str,
+        logical_id: &str,
+        expected_revision: i64,
+    ) -> Result<PlanView> {
+        self.store.accept_task(
+            project_id,
+            logical_id,
+            expected_revision,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?;
+        self.load_plan(project_id)
+    }
+
+    pub fn export_active_plan_json(&self, project_id: &str) -> Result<String> {
+        Ok(self.store.export_active_plan_json(project_id)?)
     }
 }
 
@@ -376,5 +510,91 @@ mod tests {
         assert_eq!(view.research.len(), 2);
         assert_eq!(view.briefs[0].status, "approved");
         assert_eq!(view.briefs[1].status, "approved");
+    }
+
+    #[test]
+    fn approved_plan_service_updates_portfolio_and_exports_scope() {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path().join("plan-project");
+        std::fs::create_dir(&folder).unwrap();
+        let database = temp.path().join("portfolio.sqlite");
+        let mut engine = ProjectEngine::open(&database).unwrap();
+        let project = engine.import_existing(&folder, "Plan Project").unwrap();
+        let brief = BriefContent {
+            idea: "Build an app".into(),
+            audience: "Solo builders".into(),
+            problem: "Planning is scattered".into(),
+            desired_outcome: "A reviewable plan".into(),
+            ..Default::default()
+        };
+        engine.save_brief(&project.id, 0, &brief).unwrap();
+        engine.approve_latest_brief(&project.id, 1).unwrap();
+        let plan = PlanContent {
+            tasks: vec![TaskSpec {
+                id: "task-one".into(),
+                epic_id: None,
+                title: "Build shell".into(),
+                outcome: "Usable shell".into(),
+                weight: 4,
+                risk: "low".into(),
+                criteria: vec![CriterionSpec {
+                    id: "criterion-one".into(),
+                    assertion: "Shell launches".into(),
+                    verifier: "owner".into(),
+                    required_evidence: vec!["screenshot".into()],
+                }],
+                verification_commands: vec!["cargo test".into()],
+                deliverables: vec!["desktop binary".into()],
+                context_links: Vec::new(),
+                estimate_band: "small".into(),
+                owner_decision_triggers: Vec::new(),
+            }],
+            ..Default::default()
+        };
+        engine.save_plan(&project.id, 0, &plan).unwrap();
+        assert_eq!(
+            engine.list_overviews().unwrap()[0].next_owner_action,
+            "Review task plan revision 1"
+        );
+        engine.approve_latest_plan(&project.id, 1).unwrap();
+        let task = engine
+            .load_plan(&project.id)
+            .unwrap()
+            .active_tasks
+            .remove(0);
+        assert_eq!(task.status, "ready");
+        engine
+            .submit_task_for_review(&project.id, &task.logical_id, task.revision)
+            .unwrap();
+        engine
+            .verify_criterion(
+                &project.id,
+                &task.logical_id,
+                "criterion-one",
+                2,
+                &BTreeMap::from([("screenshot".into(), "artifact://shell".into())]),
+            )
+            .unwrap();
+        engine
+            .accept_task(&project.id, &task.logical_id, 3)
+            .unwrap();
+        assert_eq!(
+            engine.list_overviews().unwrap()[0].verified_completion_basis_points,
+            10_000
+        );
+        let export: serde_json::Value =
+            serde_json::from_str(&engine.export_active_plan_json(&project.id).unwrap()).unwrap();
+        assert_eq!(export["scope_revision"], 1);
+        assert_eq!(export["tasks"][0]["status"], "accepted");
+        drop(engine);
+        assert_eq!(
+            ProjectEngine::open(database)
+                .unwrap()
+                .load_plan(&project.id)
+                .unwrap()
+                .active_tasks[0]
+                .status,
+            "accepted"
+        );
     }
 }

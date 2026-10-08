@@ -13,6 +13,7 @@ Updated 8 October 2026. Task acceptance follows `plan/backlog.json`; an implemen
 | P06 | Accepted for foundation | Folder create/import, Git identity, persisted portfolio and scope metrics, two-repository persistence test, Windows UI visual review and screenshot passed. Three-OS CI passed. M1 Max hands-on import remains a release check. Evidence: `docs/portfolio-build.md`. |
 | P07 | In verification | Three-pane shell, project-scoped PTY tabs, drag-resizable and persisted layout implemented. Windows shell, resize, exit, ANSI/Unicode parser, bounded large-output, and process-close tests pass; UI layout screenshot and passing three-OS CI captured. Hands-on terminal input in the UI and M1 Max smoke remain. Evidence: `docs/terminal-build.md`. |
 | P08 | Accepted for foundation | Guided intake, sourced facts/hypotheses, immutable brief revisions, exact-revision approval, visible deltas, Windows desktop journey, revision conflict and audit tests, and full Windows checks passed. Evidence: `docs/brief-build.md`. M1 Max hands-on review remains a release check. |
-| P09–P19 | Not started | Dependencies and gates in `plan/backlog.json`. |
+| P09 | In verification | Versioned plan editor, approval-bound scope revisions, cycle rejection, dependency-aware runnable tasks, evidence-backed acceptance, weighted completion and scope carry-forward implemented. Windows UI plan journey, graph/completion tests, and full workspace checks pass; three-OS CI pending. Evidence: `docs/plan-build.md`. |
+| P10–P19 | Not started | Dependencies and gates in `plan/backlog.json`. |
 
 The MacBook Pro M1 Max is not yet available. Native macOS checks remain release requirements and do not block Windows foundation work.

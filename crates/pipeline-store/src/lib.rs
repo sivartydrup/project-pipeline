@@ -9,14 +9,18 @@ use std::time::Duration;
 
 mod discovery;
 pub use discovery::{BriefRecord, BriefStatus, ResearchInput, ResearchRecord};
+mod plan;
+pub use plan::{CriterionRecord, PlanRecord, PlanStatus, TaskRecord};
 
-const CURRENT_SCHEMA_VERSION: i64 = 3;
+const CURRENT_SCHEMA_VERSION: i64 = 4;
 const INITIAL_SCHEMA: &str = include_str!("../migrations/001_initial.sql");
 const PROJECT_GIT_SCHEMA: &str = include_str!("../migrations/002_project_git.sql");
 const DISCOVERY_SCHEMA: &str = include_str!("../migrations/003_discovery.sql");
+const PLAN_SCHEMA: &str = include_str!("../migrations/004_plan.sql");
 const EXPORT_TABLES: &[&str] = &[
     "projects",
     "brief_revisions",
+    "plan_revisions",
     "research_findings",
     "milestones",
     "epics",
@@ -63,6 +67,32 @@ pub enum StoreError {
     BriefAlreadyApproved,
     #[error("sourced research requires a source URI and access date")]
     MissingResearchSource,
+    #[error(transparent)]
+    InvalidPlan(#[from] pipeline_domain::PlanError),
+    #[error("plan revision conflict for project {id}: expected {expected}, actual {actual}")]
+    PlanRevisionConflict {
+        id: String,
+        expected: i64,
+        actual: i64,
+    },
+    #[error("an approved brief is required before plan approval")]
+    PlanRequiresBrief,
+    #[error("approve the latest brief revision before approving the task plan")]
+    PlanRequiresCurrentBrief,
+    #[error("only the owner may approve a plan or accept a task")]
+    PlanRequiresOwner,
+    #[error("plan revision is already approved")]
+    PlanAlreadyApproved,
+    #[error("task is not in the active approved scope: {0}")]
+    TaskNotInActiveScope(String),
+    #[error("task has unresolved blocking dependencies: {0}")]
+    TaskDependencyBlocked(String),
+    #[error("task cannot transition from {from} to {to}")]
+    InvalidTaskTransition { from: String, to: &'static str },
+    #[error("task acceptance criteria are not verified with required evidence: {0}")]
+    CriteriaNotVerified(String),
+    #[error("missing evidence reference for required kind: {0}")]
+    MissingEvidence(String),
     #[error("database schema {found} is newer than supported schema {supported}")]
     NewerSchema { found: i64, supported: i64 },
     #[error("backup destination already exists")]
@@ -197,7 +227,11 @@ impl Store {
 
     pub fn project_metrics(&self, project_id: &str) -> Result<ProjectMetrics> {
         let (accepted_weight, total_weight, blocked_count): (i64, i64, i64) = self.connection.query_row(
-            "SELECT COALESCE(SUM(CASE WHEN status='accepted' THEN weight ELSE 0 END), 0), \
+            "SELECT COALESCE(SUM(CASE WHEN status='accepted' AND EXISTS
+                    (SELECT 1 FROM criteria c WHERE c.task_id=tasks.id)
+                    AND NOT EXISTS (SELECT 1 FROM criteria c WHERE c.task_id=tasks.id
+                    AND (c.accepted_at IS NULL OR c.verified_by IS NULL))
+                    THEN weight ELSE 0 END), 0), \
                     COALESCE(SUM(weight), 0), \
                     COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END), 0) \
              FROM tasks WHERE project_id=?1 AND scope_revision=(SELECT active_scope_revision FROM projects WHERE id=?1)",
@@ -413,6 +447,9 @@ fn migrate(connection: &mut Connection) -> Result<()> {
     if version < 3 {
         apply_migration(connection, 3, DISCOVERY_SCHEMA)?;
     }
+    if version < 4 {
+        apply_migration(connection, 4, PLAN_SCHEMA)?;
+    }
     Ok(())
 }
 
@@ -500,7 +537,7 @@ mod tests {
         assert_eq!(restored.get_project("p1").unwrap().unwrap().name, "First");
         assert_eq!(restored.activity_count("p1").unwrap(), 1);
         let export: Value = serde_json::from_str(&restored.export_json().unwrap()).unwrap();
-        assert_eq!(export["schema_version"], 3);
+        assert_eq!(export["schema_version"], 4);
         assert_eq!(export["tables"]["projects"][0]["id"], "p1");
         assert_eq!(
             export["tables"]["activity_events"][0]["operation"],
@@ -579,13 +616,51 @@ mod tests {
             .unwrap();
         drop(connection);
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 3);
+        assert_eq!(store.schema_version().unwrap(), 4);
         assert_eq!(store.get_project("p1").unwrap().unwrap().git_root, None);
         let backup = Connection::open(path.with_extension("pre-v1.sqlite")).unwrap();
         let version: i64 = backup
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, 1);
+    }
+
+    #[test]
+    fn upgrades_v3_task_rows_and_keeps_preupgrade_backup() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("pipeline.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        apply_migration(&mut connection, 1, INITIAL_SCHEMA).unwrap();
+        apply_migration(&mut connection, 2, PROJECT_GIT_SCHEMA).unwrap();
+        apply_migration(&mut connection, 3, DISCOVERY_SCHEMA).unwrap();
+        connection.execute("INSERT INTO projects(id,name,path,active_scope_revision) VALUES ('p1','First','C:/first',1)",[]).unwrap();
+        connection
+            .execute(
+                "INSERT INTO tasks(id,project_id,title,outcome,status,weight,scope_revision)
+            VALUES ('old-task','p1','Old','done','ready',2,1)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO criteria(id,task_id,assertion,verifier)
+            VALUES ('old-criterion','old-task','works','owner')",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 4);
+        let tasks = store.list_active_tasks("p1").unwrap();
+        assert_eq!(tasks[0].logical_id, "old-task");
+        assert_eq!(tasks[0].criteria[0].logical_id, "old-criterion");
+        let backup = Connection::open(path.with_extension("pre-v3.sqlite")).unwrap();
+        assert_eq!(
+            backup
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
     }
 
     #[test]
@@ -610,6 +685,13 @@ mod tests {
                 "INSERT INTO tasks(id,project_id,title,outcome,status,weight,scope_revision) VALUES (?1,'p1',?1,'done',?2,?3,?4)",
                 params![id, status, weight, scope],
             ).unwrap();
+            if status == "accepted" {
+                store.connection.execute(
+                    "INSERT INTO criteria(id,task_id,assertion,verifier,accepted_at,verified_by)
+                     VALUES (?1,?2,'works','owner',CURRENT_TIMESTAMP,'owner')",
+                    params![format!("criterion-{id}"),id],
+                ).unwrap();
+            }
         }
         let metrics = store.project_metrics("p1").unwrap();
         assert_eq!(metrics.verified_completion_basis_points, 4000);
