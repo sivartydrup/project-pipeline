@@ -58,6 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "brief-approve",
     )?;
     let plan = PlanContent {
+        milestones: vec![],
         epics: vec![EpicSpec {
             id: "launch-app".into(),
             title: "Launch the app".into(),

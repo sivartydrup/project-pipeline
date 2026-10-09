@@ -9,14 +9,17 @@ use std::time::Duration;
 
 mod discovery;
 pub use discovery::{BriefRecord, BriefStatus, ResearchInput, ResearchRecord};
+mod decisions;
+pub use decisions::{ActivityRecord, DecisionInput, DecisionRecord, InboxItem};
 mod plan;
 pub use plan::{CriterionRecord, PlanRecord, PlanStatus, TaskRecord};
 
-const CURRENT_SCHEMA_VERSION: i64 = 4;
+const CURRENT_SCHEMA_VERSION: i64 = 5;
 const INITIAL_SCHEMA: &str = include_str!("../migrations/001_initial.sql");
 const PROJECT_GIT_SCHEMA: &str = include_str!("../migrations/002_project_git.sql");
 const DISCOVERY_SCHEMA: &str = include_str!("../migrations/003_discovery.sql");
 const PLAN_SCHEMA: &str = include_str!("../migrations/004_plan.sql");
+const DECISIONS_SCHEMA: &str = include_str!("../migrations/005_decisions.sql");
 const EXPORT_TABLES: &[&str] = &[
     "projects",
     "brief_revisions",
@@ -99,6 +102,24 @@ pub enum StoreError {
     BackupExists,
     #[error("backup failed integrity check: {0}")]
     BackupInvalid(String),
+    #[error("decision not found in project: {0}")]
+    DecisionNotFound(String),
+    #[error("decision revision conflict for {id}: expected {expected}, actual {actual}")]
+    DecisionRevisionConflict {
+        id: String,
+        expected: i64,
+        actual: i64,
+    },
+    #[error("decision is already resolved")]
+    DecisionResolved,
+    #[error("decision alternative is missing or invalid")]
+    InvalidDecisionAlternative,
+    #[error("decision impact must be low, medium, high, or blocking")]
+    InvalidDecisionImpact,
+    #[error("only the owner may resolve a decision")]
+    DecisionRequiresOwner,
+    #[error("decision supersession is fixed after proposal or the target is already superseded")]
+    InvalidSupersession,
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -450,6 +471,9 @@ fn migrate(connection: &mut Connection) -> Result<()> {
     if version < 4 {
         apply_migration(connection, 4, PLAN_SCHEMA)?;
     }
+    if version < 5 {
+        apply_migration(connection, 5, DECISIONS_SCHEMA)?;
+    }
     Ok(())
 }
 
@@ -537,7 +561,7 @@ mod tests {
         assert_eq!(restored.get_project("p1").unwrap().unwrap().name, "First");
         assert_eq!(restored.activity_count("p1").unwrap(), 1);
         let export: Value = serde_json::from_str(&restored.export_json().unwrap()).unwrap();
-        assert_eq!(export["schema_version"], 4);
+        assert_eq!(export["schema_version"], CURRENT_SCHEMA_VERSION);
         assert_eq!(export["tables"]["projects"][0]["id"], "p1");
         assert_eq!(
             export["tables"]["activity_events"][0]["operation"],
@@ -616,7 +640,7 @@ mod tests {
             .unwrap();
         drop(connection);
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 4);
+        assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
         assert_eq!(store.get_project("p1").unwrap().unwrap().git_root, None);
         let backup = Connection::open(path.with_extension("pre-v1.sqlite")).unwrap();
         let version: i64 = backup
@@ -650,7 +674,7 @@ mod tests {
             .unwrap();
         drop(connection);
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 4);
+        assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
         let tasks = store.list_active_tasks("p1").unwrap();
         assert_eq!(tasks[0].logical_id, "old-task");
         assert_eq!(tasks[0].criteria[0].logical_id, "old-criterion");
@@ -661,6 +685,33 @@ mod tests {
                 .unwrap(),
             3
         );
+    }
+
+    #[test]
+    fn upgrades_v4_decisions_and_keeps_preupgrade_backup() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("pipeline.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        apply_migration(&mut connection, 1, INITIAL_SCHEMA).unwrap();
+        apply_migration(&mut connection, 2, PROJECT_GIT_SCHEMA).unwrap();
+        apply_migration(&mut connection, 3, DISCOVERY_SCHEMA).unwrap();
+        apply_migration(&mut connection, 4, PLAN_SCHEMA).unwrap();
+        connection
+            .execute(
+                "INSERT INTO projects(id,name,path) VALUES ('p','Project','C:/p')",
+                [],
+            )
+            .unwrap();
+        connection.execute("INSERT INTO decisions(id,project_id,question,alternatives_json,impact,status,actor)
+            VALUES ('d','p','Question','[\"A\",\"B\"]','high','proposed','agent')",[]).unwrap();
+        drop(connection);
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
+        assert_eq!(
+            store.list_decisions("p").unwrap()[0].input.alternatives,
+            vec!["A", "B"]
+        );
+        assert!(path.with_extension("pre-v4.sqlite").exists());
     }
 
     #[test]

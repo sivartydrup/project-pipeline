@@ -1,7 +1,8 @@
 use eframe::egui;
 use pipeline_engine::{
-    BriefContent, CriterionSpec, DependencyKind, DependencySpec, DiscoveryView, EpicSpec,
-    PlanContent, PlanView, ProjectEngine, ProjectOverview, ResearchInput, TaskSpec,
+    BriefContent, CriterionSpec, DecisionInput, DependencyKind, DependencySpec, DiscoveryView,
+    EpicSpec, InboxItem, MilestoneSpec, PlanContent, PlanView, ProjectEngine, ProjectOverview,
+    ResearchInput, ReviewView, TaskSpec,
 };
 use pipeline_terminal::TerminalSession;
 use serde::{Deserialize, Serialize};
@@ -49,6 +50,7 @@ enum Tab {
     Research,
     Plan,
     Decisions,
+    Activity,
     Runs,
     About,
 }
@@ -61,10 +63,17 @@ enum PlanAction {
     Accept(String, i64),
 }
 
+enum DecisionAction {
+    Save,
+    Approve(String, i64, String),
+    Reject(String, i64),
+}
+
 struct DesktopApp {
     data_dir: Option<PathBuf>,
     engine: Option<ProjectEngine>,
     projects: Vec<ProjectOverview>,
+    global_inbox: Vec<InboxItem>,
     selected_project: Option<String>,
     active_tab: Tab,
     search: String,
@@ -78,6 +87,11 @@ struct DesktopApp {
     plan: Option<PlanView>,
     plan_draft: PlanContent,
     plan_message: Option<String>,
+    review: Option<ReviewView>,
+    decision_draft: DecisionInput,
+    editing_decision: Option<String>,
+    decision_message: Option<String>,
+    selected_decision_options: BTreeMap<String, String>,
     evidence_drafts: BTreeMap<String, BTreeMap<String, String>>,
     new_dependency_from: String,
     new_dependency_to: String,
@@ -111,6 +125,7 @@ impl Default for DesktopApp {
             data_dir: data_dir.clone(),
             engine: None,
             projects: Vec::new(),
+            global_inbox: Vec::new(),
             selected_project: None,
             active_tab: Tab::Overview,
             search: String::new(),
@@ -127,6 +142,14 @@ impl Default for DesktopApp {
             plan: None,
             plan_draft: PlanContent::default(),
             plan_message: None,
+            review: None,
+            decision_draft: DecisionInput {
+                impact: "medium".into(),
+                ..Default::default()
+            },
+            editing_decision: None,
+            decision_message: None,
+            selected_decision_options: BTreeMap::new(),
             evidence_drafts: BTreeMap::new(),
             new_dependency_from: String::new(),
             new_dependency_to: String::new(),
@@ -161,6 +184,7 @@ impl Default for DesktopApp {
                                 app.message = Some(format!("Unable to load projects: {error}"))
                             }
                         }
+                        app.global_inbox = engine.global_inbox().unwrap_or_default();
                         app.selected_project =
                             app.projects.first().map(|project| project.id.clone());
                         if let Some(project_id) = &app.selected_project {
@@ -180,6 +204,12 @@ impl Default for DesktopApp {
                                 }
                                 Err(error) => {
                                     app.message = Some(format!("Unable to load plan: {error}"))
+                                }
+                            }
+                            match engine.load_review(project_id) {
+                                Ok(view) => app.review = Some(view),
+                                Err(error) => {
+                                    app.message = Some(format!("Unable to load decisions: {error}"))
                                 }
                             }
                         }
@@ -241,6 +271,8 @@ impl DesktopApp {
                 self.import_name.clear();
                 self.refresh_discovery();
                 self.refresh_plan();
+                self.refresh_review();
+                self.refresh_global_inbox();
             }
             Err(error) => self.message = Some(error.to_string()),
         }
@@ -253,6 +285,27 @@ impl DesktopApp {
             .min_size(200.0)
             .show(ui, |ui| {
                 ui.heading("Projects");
+                egui::CollapsingHeader::new(format!("Owner inbox ({})", self.global_inbox.len()))
+                    .show(ui, |ui| {
+                        for item in self.global_inbox.clone() {
+                            let project_name = self
+                                .projects
+                                .iter()
+                                .find(|project| project.id == item.project_id)
+                                .map_or("Project", |project| project.name.as_str());
+                            if ui
+                                .button(format!("{project_name}: {}", item.title))
+                                .clicked()
+                            {
+                                self.select_project(item.project_id);
+                                self.active_tab = match item.kind.as_str() {
+                                    "brief" => Tab::Brief,
+                                    "plan" | "task" => Tab::Plan,
+                                    _ => Tab::Decisions,
+                                };
+                            }
+                        }
+                    });
                 ui.text_edit_singleline(&mut self.search);
                 ui.separator();
                 ui.label("Folder path");
@@ -316,6 +369,7 @@ impl DesktopApp {
         self.terminal_message = None;
         self.refresh_discovery();
         self.refresh_plan();
+        self.refresh_review();
     }
 
     fn refresh_discovery(&mut self) {
@@ -359,6 +413,84 @@ impl DesktopApp {
         }
     }
 
+    fn refresh_review(&mut self) {
+        let Some(project_id) = &self.selected_project else {
+            self.review = None;
+            return;
+        };
+        let Some(engine) = &self.engine else {
+            return;
+        };
+        match engine.load_review(project_id) {
+            Ok(view) => {
+                self.review = Some(view);
+                self.decision_message = None;
+            }
+            Err(error) => self.decision_message = Some(error.to_string()),
+        }
+    }
+
+    fn refresh_global_inbox(&mut self) {
+        if let Some(engine) = &self.engine
+            && let Ok(items) = engine.global_inbox()
+        {
+            self.global_inbox = items;
+        }
+    }
+
+    fn clear_decision_draft(&mut self) {
+        self.editing_decision = None;
+        self.decision_draft = DecisionInput {
+            impact: "medium".into(),
+            ..Default::default()
+        };
+        self.selected_decision_options.clear();
+    }
+
+    fn run_decision_action(&mut self, action: DecisionAction) {
+        let (Some(engine), Some(project_id)) =
+            (self.engine.as_mut(), self.selected_project.as_deref())
+        else {
+            return;
+        };
+        let result = match action {
+            DecisionAction::Save => {
+                if let Some(id) = &self.editing_decision {
+                    let revision = self
+                        .review
+                        .as_ref()
+                        .and_then(|view| view.decisions.iter().find(|item| &item.id == id))
+                        .map_or(0, |item| item.revision);
+                    engine.revise_decision(project_id, id, revision, &self.decision_draft)
+                } else {
+                    engine.propose_decision(project_id, &self.decision_draft)
+                }
+            }
+            DecisionAction::Approve(id, revision, option) => {
+                engine.resolve_decision(project_id, &id, revision, Some(&option), true)
+            }
+            DecisionAction::Reject(id, revision) => {
+                engine.resolve_decision(project_id, &id, revision, None, false)
+            }
+        };
+        match result {
+            Ok(view) => {
+                let projects = engine.list_overviews().ok();
+                let inbox = engine.global_inbox().ok();
+                self.review = Some(view);
+                self.decision_message = Some("Decision saved with audit history".into());
+                self.clear_decision_draft();
+                if let Some(projects) = projects {
+                    self.projects = projects;
+                }
+                if let Some(items) = inbox {
+                    self.global_inbox = items;
+                }
+            }
+            Err(error) => self.decision_message = Some(error.to_string()),
+        }
+    }
+
     fn run_plan_action(&mut self, action: PlanAction) {
         let (Some(engine), Some(project_id)) =
             (self.engine.as_mut(), self.selected_project.as_deref())
@@ -398,6 +530,12 @@ impl DesktopApp {
                 if let Ok(projects) = engine.list_overviews() {
                     self.projects = projects;
                 }
+                if let Ok(review) = engine.load_review(project_id) {
+                    self.review = Some(review);
+                }
+                if let Ok(items) = engine.global_inbox() {
+                    self.global_inbox = items;
+                }
             }
             Err(error) => self.plan_message = Some(error.to_string()),
         }
@@ -420,6 +558,12 @@ impl DesktopApp {
                 if let Ok(projects) = engine.list_overviews() {
                     self.projects = projects;
                 }
+                if let Ok(review) = engine.load_review(project_id) {
+                    self.review = Some(review);
+                }
+                if let Ok(items) = engine.global_inbox() {
+                    self.global_inbox = items;
+                }
             }
             Err(error) => self.discovery_message = Some(error.to_string()),
         }
@@ -441,6 +585,12 @@ impl DesktopApp {
                 self.discovery_message = Some(format!("Approved brief revision {expected}"));
                 if let Ok(projects) = engine.list_overviews() {
                     self.projects = projects;
+                }
+                if let Ok(review) = engine.load_review(project_id) {
+                    self.review = Some(review);
+                }
+                if let Ok(items) = engine.global_inbox() {
+                    self.global_inbox = items;
                 }
             }
             Err(error) => self.discovery_message = Some(error.to_string()),
@@ -1077,16 +1227,47 @@ impl DesktopApp {
                 self.plan_draft.dependencies.retain(|edge| {
                     edge.from_task_id != removed.id && edge.to_task_id != removed.id
                 });
+                for milestone in &mut self.plan_draft.milestones {
+                    milestone.task_ids.retain(|id| id != &removed.id);
+                }
             }
-            ui.separator();
-            ui.heading("Dependencies");
-            ui.label("A blocking edge means the first task waits for the prerequisite.");
             let task_choices: Vec<_> = self
                 .plan_draft
                 .tasks
                 .iter()
                 .map(|task| (task.id.clone(), task.title.clone()))
                 .collect();
+            ui.separator();
+            ui.heading("Milestones");
+            if ui.button("+ Add milestone").clicked() {
+                self.plan_draft.milestones.push(MilestoneSpec {
+                    id: Uuid::new_v4().to_string(),
+                    title: String::new(),
+                    outcome: String::new(),
+                    task_ids: Vec::new(),
+                });
+            }
+            let mut remove_milestone=None;
+            for (index,milestone) in self.plan_draft.milestones.iter_mut().enumerate() {
+                ui.group(|ui| {
+                    ui.label(format!("Milestone {}",index+1));
+                    ui.text_edit_singleline(&mut milestone.title);
+                    brief_field(ui,"Outcome",&mut milestone.outcome,2);
+                    ui.label("Tasks in this milestone");
+                    for (id,title) in &task_choices {
+                        let mut included=milestone.task_ids.contains(id);
+                        if ui.checkbox(&mut included,title).changed() {
+                            if included { milestone.task_ids.push(id.clone()); }
+                            else { milestone.task_ids.retain(|task_id| task_id != id); }
+                        }
+                    }
+                    if ui.button("Remove milestone").clicked() { remove_milestone=Some(index); }
+                });
+            }
+            if let Some(index)=remove_milestone { self.plan_draft.milestones.remove(index); }
+            ui.separator();
+            ui.heading("Dependencies");
+            ui.label("A blocking edge means the first task waits for the prerequisite.");
             if !task_choices
                 .iter()
                 .any(|(id, _)| id == &self.new_dependency_from)
@@ -1180,6 +1361,9 @@ impl DesktopApp {
                     .id_salt(&revision.id)
                     .show(ui, |ui| {
                         ui.label(format!("Content hash: {}", revision.content_hash));
+                        for milestone in &revision.content.milestones {
+                            ui.label(format!("Milestone: {} — {}", milestone.title, milestone.outcome));
+                        }
                         for epic in &revision.content.epics {
                             ui.label(format!("Epic: {} — {}", epic.title, epic.outcome));
                         }
@@ -1211,6 +1395,27 @@ impl DesktopApp {
                     });
                 }
                 ui.separator();
+                ui.heading("Active milestones");
+                if let Some(active_plan)=view.revisions.iter().find(|revision| revision.scope_revision==Some(active_scope)) {
+                    for milestone in &active_plan.content.milestones {
+                        ui.group(|ui| {
+                            ui.strong(&milestone.title);
+                            ui.label(&milestone.outcome);
+                            for task_id in &milestone.task_ids {
+                                let title=active_plan.content.tasks.iter().find(|task| &task.id==task_id)
+                                    .map_or(task_id.as_str(),|task|task.title.as_str());
+                                ui.label(format!("Task: {title}"));
+                            }
+                            let linked=self.review.as_ref().map_or(0,|review| review.decisions.iter()
+                                .filter(|decision|decision.task_logical_id.as_ref()
+                                    .is_some_and(|id|milestone.task_ids.contains(id))).count());
+                            if linked>0 && ui.button(format!("Decisions ({linked})")).clicked() {
+                                self.active_tab=Tab::Decisions;
+                            }
+                        });
+                    }
+                }
+                ui.separator();
                 ui.heading("Active scope tasks");
                 for task in &view.active_tasks {
                     ui.group(|ui| {
@@ -1219,6 +1424,11 @@ impl DesktopApp {
                             task.title, task.status, task.weight
                         ));
                         ui.label(&task.outcome);
+                        let linked_decisions = self.review.as_ref().map_or(0, |review| review.decisions.iter()
+                            .filter(|decision| decision.task_logical_id.as_deref() == Some(task.logical_id.as_str())).count());
+                        if linked_decisions > 0 && ui.button(format!("Decisions ({linked_decisions})")).clicked() {
+                            self.active_tab = Tab::Decisions;
+                        }
                         if !task.unresolved_blockers.is_empty() {
                             ui.label(format!(
                                 "Waiting for: {}",
@@ -1290,6 +1500,238 @@ impl DesktopApp {
         }
     }
 
+    fn decisions_workspace(&mut self, ui: &mut egui::Ui) {
+        let Some(review) = self.review.clone() else {
+            ui.heading("Decisions");
+            ui.label("Select a project to review decisions.");
+            return;
+        };
+        let mut action = None;
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.heading("Owner inbox");
+            if review.inbox.is_empty() {
+                ui.label("No pending requests.");
+            }
+            for item in &review.inbox {
+                ui.horizontal_wrapped(|ui| {
+                    ui.strong(format!("{} · {}", item.kind.to_uppercase(), item.title));
+                    ui.label(&item.detail);
+                    if item.kind == "brief" && ui.button("Open brief").clicked() {
+                        self.active_tab = Tab::Brief;
+                    }
+                    if (item.kind == "plan" || item.kind == "task")
+                        && ui.button("Open plan").clicked()
+                    {
+                        self.active_tab = Tab::Plan;
+                    }
+                });
+            }
+            ui.separator();
+            ui.heading(if self.editing_decision.is_some() {
+                "Edit proposed decision"
+            } else {
+                "Propose decision"
+            });
+            ui.label("Question");
+            ui.text_edit_singleline(&mut self.decision_draft.question);
+            ui.label("Task ID in active plan (optional)");
+            let task_id = self
+                .decision_draft
+                .task_logical_id
+                .get_or_insert_with(String::new);
+            ui.text_edit_singleline(task_id);
+            if task_id.trim().is_empty() {
+                self.decision_draft.task_logical_id = None;
+            }
+            ui.label("Supersedes prior decision (optional)");
+            ui.add_enabled_ui(self.editing_decision.is_none(), |ui| {
+                egui::ComboBox::from_id_salt("supersedes-decision")
+                    .selected_text(
+                        self.decision_draft
+                            .supersedes_id
+                            .as_deref()
+                            .unwrap_or("None"),
+                    )
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.decision_draft.supersedes_id, None, "None");
+                        for prior in &review.decisions {
+                            if prior.status != "superseded" {
+                                ui.selectable_value(
+                                    &mut self.decision_draft.supersedes_id,
+                                    Some(prior.id.clone()),
+                                    format!("{} · {}", prior.id, prior.input.question),
+                                );
+                            }
+                        }
+                    });
+            });
+            ui.label("Alternatives (one per line)");
+            let mut alternatives = self.decision_draft.alternatives.join("\n");
+            if ui
+                .add(egui::TextEdit::multiline(&mut alternatives).desired_rows(3))
+                .changed()
+            {
+                self.decision_draft.alternatives = alternatives
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+            }
+            ui.label("Recommended option (exactly as listed)");
+            ui.text_edit_singleline(&mut self.decision_draft.recommendation);
+            ui.label("Rationale");
+            ui.add(egui::TextEdit::multiline(&mut self.decision_draft.rationale).desired_rows(2));
+            ui.label("Evidence references (one per line)");
+            let mut evidence = self.decision_draft.evidence.join("\n");
+            if ui
+                .add(egui::TextEdit::multiline(&mut evidence).desired_rows(2))
+                .changed()
+            {
+                self.decision_draft.evidence = evidence
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+            }
+            ui.horizontal(|ui| {
+                ui.label("Impact");
+                egui::ComboBox::from_id_salt("decision-impact")
+                    .selected_text(&self.decision_draft.impact)
+                    .show_ui(ui, |ui| {
+                        for value in ["low", "medium", "high", "blocking"] {
+                            ui.selectable_value(
+                                &mut self.decision_draft.impact,
+                                value.to_owned(),
+                                value,
+                            );
+                        }
+                    });
+                if ui.button("Save proposal").clicked() {
+                    action = Some(DecisionAction::Save);
+                }
+                if self.editing_decision.is_some() && ui.button("Cancel edit").clicked() {
+                    self.clear_decision_draft();
+                }
+            });
+            if let Some(message) = &self.decision_message {
+                ui.label(message);
+            }
+            ui.separator();
+            ui.heading("Decision register");
+            for decision in &review.decisions {
+                ui.group(|ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.strong(&decision.input.question);
+                        ui.label(format!(
+                            "{} · {} · revision {}",
+                            decision.status, decision.input.impact, decision.revision
+                        ));
+                    });
+                    if let Some(task) = &decision.task_logical_id {
+                        ui.label(format!("Task: {task}"));
+                    }
+                    ui.label(format!(
+                        "Alternatives: {}",
+                        decision.input.alternatives.join(" / ")
+                    ));
+                    ui.label(format!("Recommended: {}", decision.input.recommendation));
+                    ui.label(format!("Rationale: {}", decision.input.rationale));
+                    if !decision.input.evidence.is_empty() {
+                        ui.label(format!("Evidence: {}", decision.input.evidence.join(", ")));
+                    }
+                    if let Some(prior) = &decision.input.supersedes_id {
+                        ui.label(format!("Supersedes: {prior}"));
+                    }
+                    ui.label(format!(
+                        "Actor: {} · Created: {}",
+                        decision.actor, decision.created_at
+                    ));
+                    if let Some(option) = &decision.selected_option {
+                        ui.label(format!("Selected: {option}"));
+                    }
+                    if decision.status == "proposed" {
+                        ui.horizontal(|ui| {
+                            if ui.button("Edit").clicked() {
+                                self.editing_decision = Some(decision.id.clone());
+                                self.decision_draft = decision.input.clone();
+                                self.selected_decision_options.insert(
+                                    decision.id.clone(),
+                                    decision.input.recommendation.clone(),
+                                );
+                            }
+                            let choice_id = format!("choice-{}", decision.id);
+                            let selected = self
+                                .selected_decision_options
+                                .entry(decision.id.clone())
+                                .or_insert_with(|| decision.input.recommendation.clone());
+                            egui::ComboBox::from_id_salt(choice_id)
+                                .selected_text(selected.as_str())
+                                .show_ui(ui, |ui| {
+                                    for option in &decision.input.alternatives {
+                                        ui.selectable_value(selected, option.clone(), option);
+                                    }
+                                });
+                            if ui.button("Approve").clicked() {
+                                action = Some(DecisionAction::Approve(
+                                    decision.id.clone(),
+                                    decision.revision,
+                                    selected.clone(),
+                                ));
+                            }
+                            if ui.button("Reject").clicked() {
+                                action = Some(DecisionAction::Reject(
+                                    decision.id.clone(),
+                                    decision.revision,
+                                ));
+                            }
+                        });
+                    }
+                });
+            }
+        });
+        if let Some(action) = action {
+            self.run_decision_action(action);
+        }
+    }
+
+    fn activity_workspace(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Activity history");
+        let Some(review) = &self.review else {
+            ui.label("Select a project.");
+            return;
+        };
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for event in &review.activity {
+                ui.group(|ui| {
+                    ui.strong(format!(
+                        "{} · {} · {}",
+                        event.created_at, event.operation, event.actor
+                    ));
+                    ui.label(format!(
+                        "{} {} · revision {}",
+                        event.subject_type, event.subject_id, event.subject_revision
+                    ));
+                    if let Some(after) = &event.after {
+                        ui.label(after.to_string());
+                    }
+                    let destination = match event.subject_type.as_str() {
+                        "decision" => Some((Tab::Decisions, "Open decision register")),
+                        "brief" => Some((Tab::Brief, "Open brief")),
+                        "plan" | "task" | "criterion" => Some((Tab::Plan, "Open plan")),
+                        _ => None,
+                    };
+                    if let Some((tab, label)) = destination
+                        && ui.button(label).clicked()
+                    {
+                        self.active_tab = tab;
+                    }
+                });
+            }
+        });
+    }
+
     fn management(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             for (tab, name) in [
@@ -1298,6 +1740,7 @@ impl DesktopApp {
                 (Tab::Research, "Research"),
                 (Tab::Plan, "Plan"),
                 (Tab::Decisions, "Decisions"),
+                (Tab::Activity, "Activity"),
                 (Tab::Runs, "Runs"),
                 (Tab::About, "About"),
             ] {
@@ -1331,7 +1774,12 @@ impl DesktopApp {
                     ));
                     ui.label(format!("Blocked tasks: {}", project.blocked_count));
                     ui.separator();
-                    ui.label(format!("Next owner action: {}", project.next_owner_action));
+                    if ui
+                        .button(format!("Next owner action: {}", project.next_owner_action))
+                        .clicked()
+                    {
+                        self.active_tab = Tab::Decisions;
+                    }
                 } else {
                     ui.heading("No project selected");
                     ui.label("Import an existing folder or create a new project.");
@@ -1343,9 +1791,9 @@ impl DesktopApp {
             Tab::Brief => self.brief_workspace(ui),
             Tab::Research => self.research_workspace(ui),
             Tab::Decisions => {
-                ui.heading("Decisions");
-                ui.label("The decision inbox is not connected yet.");
+                self.decisions_workspace(ui);
             }
+            Tab::Activity => self.activity_workspace(ui),
             Tab::Runs => {
                 ui.heading("Agent runs");
                 ui.label("Harness integration is not connected yet.");
@@ -1414,6 +1862,20 @@ fn task_choice(
 
 fn plan_changes(before: &PlanContent, after: &PlanContent) -> Vec<String> {
     let mut changes = Vec::new();
+    for milestone in &after.milestones {
+        match before.milestones.iter().find(|old| old.id == milestone.id) {
+            None => changes.push(format!("Added milestone: {}", milestone.title)),
+            Some(old) if old != milestone => {
+                changes.push(format!("Changed milestone: {}", milestone.title))
+            }
+            _ => {}
+        }
+    }
+    for milestone in &before.milestones {
+        if !after.milestones.iter().any(|new| new.id == milestone.id) {
+            changes.push(format!("Removed milestone: {}", milestone.title));
+        }
+    }
     for epic in &after.epics {
         match before.epics.iter().find(|old| old.id == epic.id) {
             None => changes.push(format!("Added epic: {}", epic.title)),

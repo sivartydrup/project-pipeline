@@ -1,6 +1,6 @@
 # Implementation progress
 
-Updated 8 October 2026. Task acceptance follows `plan/backlog.json`; an implementation note or passing compile does not by itself accept a task.
+Updated 9 October 2026. Task acceptance follows `plan/backlog.json`; an implementation note or passing compile does not by itself accept a task.
 
 | Task | State | Evidence / remaining work |
 | --- | --- | --- |
@@ -14,6 +14,7 @@ Updated 8 October 2026. Task acceptance follows `plan/backlog.json`; an implemen
 | P07 | In verification | Three-pane shell, project-scoped PTY tabs, drag-resizable and persisted layout implemented. Windows shell, resize, exit, ANSI/Unicode parser, bounded large-output, and process-close tests pass; UI layout screenshot and passing three-OS CI captured. Hands-on terminal input in the UI and M1 Max smoke remain. Evidence: `docs/terminal-build.md`. |
 | P08 | Accepted for foundation | Guided intake, sourced facts/hypotheses, immutable brief revisions, exact-revision approval, visible deltas, Windows desktop journey, revision conflict and audit tests, and full Windows checks passed. Evidence: `docs/brief-build.md`. M1 Max hands-on review remains a release check. |
 | P09 | Accepted for foundation | Versioned plan editor, approval-bound scope revisions, cycle rejection, dependency-aware runnable tasks, evidence-backed acceptance, weighted completion and scope carry-forward. Windows UI plan journey, graph/completion tests, full workspace checks, and three-OS CI passed. Evidence: `docs/plan-build.md`. M1 Max hands-on review remains a release check. |
-| P10–P19 | Not started | Dependencies and gates in `plan/backlog.json`. |
+| P10 | In review | Decision service, revision-bound owner actions, prioritized global inbox, activity UI, milestone/task/portfolio links, v4→v5 migration, Windows tests/build, and isolated UI journeys completed. Evidence: `docs/decisions-build.md`. Reviewer acceptance remains. |
+| P11–P19 | Not started | Dependencies and gates in `plan/backlog.json`; P11 waits for P10 acceptance. |
 
 The MacBook Pro M1 Max is not yet available. Native macOS checks remain release requirements and do not block Windows foundation work.

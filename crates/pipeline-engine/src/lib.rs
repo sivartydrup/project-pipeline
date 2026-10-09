@@ -2,10 +2,13 @@
 
 pub use pipeline_domain::{
     BriefChange, BriefContent, CriterionSpec, DependencyKind, DependencySpec, EpicSpec,
-    PlanContent, PlanError, TaskSpec,
+    MilestoneSpec, PlanContent, PlanError, TaskSpec,
 };
 use pipeline_domain::{ProjectHealth, ProjectStage};
-pub use pipeline_store::{BriefRecord, PlanRecord, ResearchInput, ResearchRecord, TaskRecord};
+pub use pipeline_store::{
+    ActivityRecord, BriefRecord, DecisionInput, DecisionRecord, InboxItem, PlanRecord,
+    ResearchInput, ResearchRecord, TaskRecord,
+};
 use pipeline_store::{Store, StoreError};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -56,6 +59,13 @@ pub struct PlanView {
     pub revisions: Vec<PlanRecord>,
     pub active_scope_revision: i64,
     pub active_tasks: Vec<TaskRecord>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReviewView {
+    pub decisions: Vec<DecisionRecord>,
+    pub inbox: Vec<InboxItem>,
+    pub activity: Vec<ActivityRecord>,
 }
 
 impl PlanView {
@@ -165,7 +175,25 @@ impl ProjectEngine {
                 let metrics = self.store.project_metrics(&record.id)?;
                 let brief = self.store.brief_status(&record.id)?;
                 let plans = self.store.list_plan_revisions(&record.id)?;
-                let next_owner_action = if metrics.blocked_count > 0 {
+                let inbox = self.store.list_inbox(&record.id)?;
+                let health = match record.health {
+                    ProjectHealth::Failed | ProjectHealth::AtRisk => record.health,
+                    _ if metrics.blocked_count > 0
+                        || inbox.iter().any(|item| item.priority == 0) =>
+                    {
+                        ProjectHealth::Blocked
+                    }
+                    _ if !inbox.is_empty()
+                        || brief.approved_revision == 0
+                        || record.active_scope_revision == 0 =>
+                    {
+                        ProjectHealth::NeedsInput
+                    }
+                    _ => ProjectHealth::OnTrack,
+                };
+                let next_owner_action = if let Some(item) = inbox.first() {
+                    item.title.clone()
+                } else if metrics.blocked_count > 0 {
                     format!("Resolve {} blocked task(s)", metrics.blocked_count)
                 } else if brief.latest_revision > brief.approved_revision {
                     format!("Review brief revision {}", brief.latest_revision)
@@ -193,7 +221,7 @@ impl ProjectEngine {
                             .into_owned()
                     }),
                     stage: record.stage,
-                    health: record.health,
+                    health,
                     verified_completion_basis_points: metrics.verified_completion_basis_points,
                     blocked_count: metrics.blocked_count,
                     next_owner_action,
@@ -364,6 +392,80 @@ impl ProjectEngine {
 
     pub fn export_active_plan_json(&self, project_id: &str) -> Result<String> {
         Ok(self.store.export_active_plan_json(project_id)?)
+    }
+
+    pub fn load_review(&self, project_id: &str) -> Result<ReviewView> {
+        Ok(ReviewView {
+            decisions: self.store.list_decisions(project_id)?,
+            inbox: self.store.list_inbox(project_id)?,
+            activity: self.store.list_activity(project_id, 100)?,
+        })
+    }
+
+    pub fn global_inbox(&self) -> Result<Vec<InboxItem>> {
+        let mut items = Vec::new();
+        for project in self.store.list_projects()? {
+            items.extend(self.store.list_inbox(&project.id)?);
+        }
+        items.sort_by(|a, b| {
+            a.priority
+                .cmp(&b.priority)
+                .then_with(|| a.title.cmp(&b.title))
+        });
+        Ok(items)
+    }
+
+    pub fn propose_decision(
+        &mut self,
+        project_id: &str,
+        input: &DecisionInput,
+    ) -> Result<ReviewView> {
+        self.store.create_decision(
+            &Uuid::new_v4().to_string(),
+            project_id,
+            input,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?;
+        self.load_review(project_id)
+    }
+
+    pub fn revise_decision(
+        &mut self,
+        project_id: &str,
+        id: &str,
+        revision: i64,
+        input: &DecisionInput,
+    ) -> Result<ReviewView> {
+        self.store.revise_decision(
+            project_id,
+            id,
+            revision,
+            input,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?;
+        self.load_review(project_id)
+    }
+
+    pub fn resolve_decision(
+        &mut self,
+        project_id: &str,
+        id: &str,
+        revision: i64,
+        selected_option: Option<&str>,
+        approve: bool,
+    ) -> Result<ReviewView> {
+        self.store.resolve_decision(
+            project_id,
+            id,
+            revision,
+            selected_option,
+            approve,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?;
+        self.load_review(project_id)
     }
 }
 
@@ -557,6 +659,36 @@ mod tests {
             "Review task plan revision 1"
         );
         engine.approve_latest_plan(&project.id, 1).unwrap();
+        assert_eq!(
+            engine.list_overviews().unwrap()[0].health,
+            ProjectHealth::OnTrack
+        );
+        let decision = DecisionInput {
+            question: "Which storage?".into(),
+            alternatives: vec!["SQLite".into(), "JSON".into()],
+            recommendation: "SQLite".into(),
+            rationale: "Atomic updates".into(),
+            impact: "blocking".into(),
+            ..Default::default()
+        };
+        let review = engine.propose_decision(&project.id, &decision).unwrap();
+        assert_eq!(
+            engine.list_overviews().unwrap()[0].health,
+            ProjectHealth::Blocked
+        );
+        engine
+            .resolve_decision(
+                &project.id,
+                &review.decisions[0].id,
+                1,
+                Some("SQLite"),
+                true,
+            )
+            .unwrap();
+        assert_eq!(
+            engine.list_overviews().unwrap()[0].health,
+            ProjectHealth::OnTrack
+        );
         let task = engine
             .load_plan(&project.id)
             .unwrap()

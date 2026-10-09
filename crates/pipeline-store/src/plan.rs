@@ -583,6 +583,20 @@ fn materialize_plan(
     previous: Option<&PlanContent>,
     previous_scope: i64,
 ) -> Result<()> {
+    for (position, milestone) in content.milestones.iter().enumerate() {
+        connection.execute(
+            "INSERT INTO milestones(id,project_id,title,outcome,position,scope_revision)
+             VALUES (?1,?2,?3,?4,?5,?6)",
+            params![
+                format!("{plan_id}:{}", milestone.id),
+                project_id,
+                milestone.title,
+                milestone.outcome,
+                position as i64,
+                scope
+            ],
+        )?;
+    }
     for (position, epic) in content.epics.iter().enumerate() {
         connection.execute(
             "INSERT INTO epics(id,project_id,title,outcome,position) VALUES (?1,?2,?3,?4,?5)",
@@ -761,10 +775,16 @@ fn hash(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pipeline_domain::{CriterionSpec, DependencySpec, EpicSpec, PlanError};
+    use pipeline_domain::{CriterionSpec, DependencySpec, EpicSpec, MilestoneSpec, PlanError};
 
     fn plan() -> PlanContent {
         PlanContent {
+            milestones: vec![MilestoneSpec {
+                id: "milestone".into(),
+                title: "First release".into(),
+                outcome: "Working feature".into(),
+                task_ids: vec!["a".into(), "b".into()],
+            }],
             epics: vec![EpicSpec {
                 id: "e".into(),
                 title: "Build".into(),
@@ -838,6 +858,15 @@ mod tests {
         store
             .approve_plan_revision("p", 1, "approval-1", "owner", "approve-1")
             .unwrap();
+        let materialized: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM milestones WHERE project_id='p' AND scope_revision=1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(materialized, 1);
         assert_eq!(
             store
                 .list_runnable_tasks("p")
@@ -1004,6 +1033,7 @@ mod tests {
                 let mut store = setup();
                 let mut content = plan();
                 content.epics.clear();
+                content.milestones.clear();
                 content.dependencies.clear();
                 content.tasks = (0..3)
                     .map(|i| {

@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 
 mod plan;
 pub use plan::{
-    CriterionSpec, DependencyKind, DependencySpec, EpicSpec, PlanContent, PlanError, TaskSpec,
+    CriterionSpec, DependencyKind, DependencySpec, EpicSpec, MilestoneSpec, PlanContent, PlanError,
+    TaskSpec,
 };
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]

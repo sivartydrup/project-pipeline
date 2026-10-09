@@ -3,9 +3,19 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanContent {
+    #[serde(default)]
+    pub milestones: Vec<MilestoneSpec>,
     pub epics: Vec<EpicSpec>,
     pub tasks: Vec<TaskSpec>,
     pub dependencies: Vec<DependencySpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MilestoneSpec {
+    pub id: String,
+    pub title: String,
+    pub outcome: String,
+    pub task_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,6 +153,20 @@ impl PlanContent {
                 }
                 for requirement in &criterion.required_evidence {
                     required("evidence requirement", requirement)?;
+                }
+            }
+        }
+        for milestone in &self.milestones {
+            required("milestone title", &milestone.title)?;
+            required("milestone outcome", &milestone.outcome)?;
+            unique_id(&mut all_ids, &milestone.id)?;
+            let mut assigned = HashSet::new();
+            for task_id in &milestone.task_ids {
+                if !task_ids.contains(task_id.as_str()) {
+                    return Err(PlanError::MissingTask(task_id.clone()));
+                }
+                if !assigned.insert(task_id) {
+                    return Err(PlanError::DuplicateId(task_id.clone()));
                 }
             }
         }
@@ -325,5 +349,30 @@ mod tests {
                 "mask {mask}"
             );
         }
+    }
+
+    #[test]
+    fn milestones_require_real_unique_tasks() {
+        let mut plan = PlanContent {
+            tasks: vec![task("a")],
+            milestones: vec![MilestoneSpec {
+                id: "m".into(),
+                title: "Release".into(),
+                outcome: "Usable result".into(),
+                task_ids: vec!["missing".into()],
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            plan.validate(),
+            Err(PlanError::MissingTask("missing".into()))
+        );
+        plan.milestones[0].task_ids = vec!["a".into(), "a".into()];
+        assert_eq!(plan.validate(), Err(PlanError::DuplicateId("a".into())));
+        plan.milestones[0].task_ids.pop();
+        assert!(plan.validate().is_ok());
+        let older: PlanContent =
+            serde_json::from_str(r#"{"epics":[],"tasks":[],"dependencies":[]}"#).unwrap();
+        assert!(older.milestones.is_empty());
     }
 }
