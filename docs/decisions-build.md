@@ -1,6 +1,6 @@
 # P10 decisions, inbox, and history build
 
-9 October 2026, Windows x86_64. Implementation is in review.
+9 October 2026, Windows x86_64. Accepted by the owner; see [P10 acceptance](approval-p10-2026-10-09.md).
 
 ## Implemented
 
@@ -21,4 +21,4 @@
 ## Review limits
 
 - The UI smoke used isolated fixtures under `target/p10-ui-smoke` and `target/p10-ui-milestone` and did not add test decisions to owner data. Interactive editing and rejection were verified at the service layer, but have not been hands-on tested in the UI.
-- Owner/reviewer transition to accepted remains outstanding. P11 stays blocked until P10 is accepted under the backlog dependency rule.
+- Apple Silicon macOS hands-on validation remains a release check under P19.
