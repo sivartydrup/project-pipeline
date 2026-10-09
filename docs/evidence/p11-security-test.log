@@ -1,0 +1,17 @@
+   Compiling pipeline-store v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-store)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.03s
+     Running unittests src\lib.rs (target\debug\deps\pipeline_store-18b664a6b18ae55f.exe)
+
+running 9 tests
+test agent::tests::read_redaction_masks_credential_fields_and_bearer_text ... ok
+test agent::tests::invalid_token_cross_project_and_cross_task_are_denied ... ok
+test agent::tests::grant_rejects_invalid_scope_and_expiry_and_token_is_not_exported ... ok
+test agent::tests::expired_token_and_token_in_payload_are_denied ... ok
+test agent::tests::replay_is_read_only_and_conflicting_replay_and_stale_revision_fail ... ok
+test agent::tests::question_is_deduplicated_and_blocks_assigned_task ... ok
+test agent::tests::scope_change_invalidates_run_and_denial_log_redacts_untrusted_fields ... ok
+test agent::tests::artifact_path_and_hash_are_enforced_and_secrets_are_rejected ... ok
+test agent::tests::all_contract_operations_use_scoped_records ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 19 filtered out; finished in 0.14s
+

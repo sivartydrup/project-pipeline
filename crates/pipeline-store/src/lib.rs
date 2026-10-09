@@ -7,19 +7,22 @@ use serde_json::{Map, Value, json};
 use std::path::Path;
 use std::time::Duration;
 
+mod agent;
 mod discovery;
+pub use agent::{AgentCommand, AgentGrant, AgentReply};
 pub use discovery::{BriefRecord, BriefStatus, ResearchInput, ResearchRecord};
 mod decisions;
 pub use decisions::{ActivityRecord, DecisionInput, DecisionRecord, InboxItem};
 mod plan;
 pub use plan::{CriterionRecord, PlanRecord, PlanStatus, TaskRecord};
 
-const CURRENT_SCHEMA_VERSION: i64 = 5;
+const CURRENT_SCHEMA_VERSION: i64 = 6;
 const INITIAL_SCHEMA: &str = include_str!("../migrations/001_initial.sql");
 const PROJECT_GIT_SCHEMA: &str = include_str!("../migrations/002_project_git.sql");
 const DISCOVERY_SCHEMA: &str = include_str!("../migrations/003_discovery.sql");
 const PLAN_SCHEMA: &str = include_str!("../migrations/004_plan.sql");
 const DECISIONS_SCHEMA: &str = include_str!("../migrations/005_decisions.sql");
+const AGENT_BRIDGE_SCHEMA: &str = include_str!("../migrations/006_agent_bridge.sql");
 const EXPORT_TABLES: &[&str] = &[
     "projects",
     "brief_revisions",
@@ -38,6 +41,7 @@ const EXPORT_TABLES: &[&str] = &[
     "test_results",
     "release_candidates",
     "activity_events",
+    "agent_denials",
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -120,6 +124,8 @@ pub enum StoreError {
     DecisionRequiresOwner,
     #[error("decision supersession is fixed after proposal or the target is already superseded")]
     InvalidSupersession,
+    #[error("agent request denied: {0}")]
+    AgentDenied(String),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -473,6 +479,9 @@ fn migrate(connection: &mut Connection) -> Result<()> {
     }
     if version < 5 {
         apply_migration(connection, 5, DECISIONS_SCHEMA)?;
+    }
+    if version < 6 {
+        apply_migration(connection, 6, AGENT_BRIDGE_SCHEMA)?;
     }
     Ok(())
 }

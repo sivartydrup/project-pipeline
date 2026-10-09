@@ -1,0 +1,5 @@
+   Compiling pipeline-store v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-store)
+   Compiling pipeline-engine v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-engine)
+   Compiling pipeline-api v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-api)
+   Compiling pipeline-cli v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.99s

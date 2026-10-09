@@ -1,0 +1,6 @@
+    Checking pipeline-store v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-store)
+    Checking pipeline-engine v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-engine)
+    Checking pipeline-api v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-api)
+    Checking pipeline-app v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-app)
+    Checking pipeline-cli v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.41s

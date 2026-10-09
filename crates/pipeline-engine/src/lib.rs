@@ -5,11 +5,12 @@ pub use pipeline_domain::{
     MilestoneSpec, PlanContent, PlanError, TaskSpec,
 };
 use pipeline_domain::{ProjectHealth, ProjectStage};
+use pipeline_store::Store;
+pub use pipeline_store::StoreError;
 pub use pipeline_store::{
-    ActivityRecord, BriefRecord, DecisionInput, DecisionRecord, InboxItem, PlanRecord,
-    ResearchInput, ResearchRecord, TaskRecord,
+    ActivityRecord, AgentCommand, AgentGrant, AgentReply, BriefRecord, DecisionInput,
+    DecisionRecord, InboxItem, PlanRecord, ResearchInput, ResearchRecord, TaskRecord,
 };
-use pipeline_store::{Store, StoreError};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
@@ -105,6 +106,26 @@ pub struct ProjectEngine {
 }
 
 impl ProjectEngine {
+    pub fn issue_agent_grant(
+        &mut self,
+        project_id: &str,
+        task_id: &str,
+        checkout: &Path,
+        operations: &[String],
+        ttl_seconds: i64,
+    ) -> Result<AgentGrant> {
+        Ok(self
+            .store
+            .issue_agent_grant(project_id, task_id, checkout, operations, ttl_seconds)?)
+    }
+
+    pub fn revoke_agent_grant(&mut self, run_id: &str) -> Result<()> {
+        Ok(self.store.revoke_agent_grant(run_id)?)
+    }
+
+    pub fn agent_command(&mut self, command: &AgentCommand) -> Result<AgentReply> {
+        Ok(self.store.agent_command(command)?)
+    }
     pub fn open(database: impl AsRef<Path>) -> Result<Self> {
         Ok(Self {
             store: Store::open(database)?,

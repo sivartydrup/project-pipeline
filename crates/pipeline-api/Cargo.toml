@@ -7,3 +7,10 @@ rust-version.workspace = true
 [dependencies]
 pipeline-domain = { path = "../pipeline-domain" }
 pipeline-engine = { path = "../pipeline-engine" }
+serde_json = "1"
+tiny_http = "0.12"
+
+[dev-dependencies]
+pipeline-store = { path = "../pipeline-store" }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+tempfile = "3"
