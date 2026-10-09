@@ -204,6 +204,146 @@ pub(crate) fn interrupt_project_on_scope_change(
 }
 
 impl Store {
+    pub fn attach_adapter_session(
+        &mut self,
+        run_id: &str,
+        expected_revision: i64,
+        session_id: &str,
+    ) -> Result<()> {
+        if !session_id.starts_with("ses") || session_id.len() > 200 {
+            return Err(StoreError::RunTransition("invalid session ID".into()));
+        }
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = get_run_from(&tx, run_id)?;
+        if run.revision != expected_revision {
+            return Err(StoreError::RevisionConflict {
+                id: run_id.into(),
+                expected: expected_revision,
+                actual: run.revision,
+            });
+        }
+        if run.state != "starting" {
+            return Err(StoreError::RunTransition(
+                "session can only attach to a starting run".into(),
+            ));
+        }
+        active_scope(&tx, &run)?;
+        let changed = tx.execute(
+            "UPDATE agent_runs SET external_session_id=?1 WHERE id=?2 AND external_session_id IS NULL",
+            params![session_id, run_id],
+        )?;
+        if changed != 1 {
+            return Err(StoreError::RunTransition("session already attached".into()));
+        }
+        insert_event(
+            &tx,
+            &run.project_id,
+            "scheduler",
+            "run.session_attach",
+            "run",
+            run_id,
+            run.revision,
+            None,
+            Some(json!({"harness":"opencode","session_id":session_id})),
+            run_id,
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn external_session_id(&self, run_id: &str) -> Result<Option<String>> {
+        self.connection
+            .query_row(
+                "SELECT external_session_id FROM agent_runs WHERE id=?1",
+                [run_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| StoreError::NotFound(run_id.into()))
+    }
+
+    pub fn append_adapter_event(
+        &mut self,
+        run_id: &str,
+        session_id: &str,
+        external_event_id: &str,
+        kind: &str,
+        summary: &str,
+    ) -> Result<Option<i64>> {
+        if external_event_id.is_empty()
+            || external_event_id.len() > 200
+            || kind.is_empty()
+            || kind.len() > 80
+            || summary.len() > 500
+        {
+            return Err(StoreError::RunTransition("invalid adapter event".into()));
+        }
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = get_run_from(&tx, run_id)?;
+        let attached: Option<String> = tx.query_row(
+            "SELECT external_session_id FROM agent_runs WHERE id=?1",
+            [run_id],
+            |row| row.get(0),
+        )?;
+        if attached.as_deref() != Some(session_id) {
+            return Err(StoreError::RunTransition("adapter session mismatch".into()));
+        }
+        let prior: Option<i64> = tx
+            .query_row(
+                "SELECT sequence FROM adapter_event_receipts WHERE run_id=?1 AND external_event_id=?2",
+                params![run_id, external_event_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if prior.is_some() {
+            return Ok(None);
+        }
+        if !matches!(
+            run.state.as_str(),
+            "starting" | "running" | "waiting_for_input" | "review" | "interrupted"
+        ) {
+            return Err(StoreError::RunTransition(
+                "run cannot receive events".into(),
+            ));
+        }
+        let sequence: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(sequence),0)+1 FROM run_events WHERE run_id=?1",
+            [run_id],
+            |row| row.get(0),
+        )?;
+        tx.execute(
+            "INSERT INTO run_events(run_id,sequence,kind,payload_json) VALUES (?1,?2,?3,?4)",
+            params![
+                run_id,
+                sequence,
+                kind,
+                json!({"summary":summary}).to_string()
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO adapter_event_receipts(run_id,external_event_id,sequence) VALUES (?1,?2,?3)",
+            params![run_id, external_event_id, sequence],
+        )?;
+        insert_event(
+            &tx,
+            &run.project_id,
+            "opencode",
+            "run.adapter_event",
+            "run",
+            run_id,
+            run.revision,
+            None,
+            Some(json!({"kind":kind,"sequence":sequence})),
+            run_id,
+        )?;
+        tx.commit()?;
+        Ok(Some(sequence))
+    }
+
     pub fn get_run(&self, id: &str) -> Result<RunRecord> {
         get_run_from(&self.connection, id)
     }
@@ -857,7 +997,7 @@ mod tests {
     use super::*;
     use crate::{
         AGENT_BRIDGE_SCHEMA, DECISIONS_SCHEMA, DISCOVERY_SCHEMA, INITIAL_SCHEMA, PLAN_SCHEMA,
-        PROJECT_GIT_SCHEMA, apply_migration,
+        PROJECT_GIT_SCHEMA, SCHEDULER_POLICY_SCHEMA, apply_migration,
     };
 
     #[test]
@@ -899,10 +1039,41 @@ mod tests {
         }
         drop(connection);
         let store = Store::open(&database).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 7);
+        assert_eq!(store.schema_version().unwrap(), 8);
         assert_eq!(store.get_run("r1").unwrap().state, "queued");
         assert_eq!(store.get_run("r2").unwrap().state, "cancelled");
         assert!(database.with_extension("pre-v6.sqlite").exists());
         assert!(store.list_pending_policy_requests("p").unwrap().is_empty());
+    }
+
+    #[test]
+    fn v7_adapter_receipts_upgrade_with_backup() {
+        let folder = tempfile::tempdir().unwrap();
+        let database = folder.path().join("pipeline.sqlite");
+        let mut connection = Connection::open(&database).unwrap();
+        for (version, sql) in [
+            (1, INITIAL_SCHEMA),
+            (2, PROJECT_GIT_SCHEMA),
+            (3, DISCOVERY_SCHEMA),
+            (4, PLAN_SCHEMA),
+            (5, DECISIONS_SCHEMA),
+            (6, AGENT_BRIDGE_SCHEMA),
+            (7, SCHEDULER_POLICY_SCHEMA),
+        ] {
+            apply_migration(&mut connection, version, sql).unwrap();
+        }
+        drop(connection);
+        let store = Store::open(&database).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 8);
+        assert!(database.with_extension("pre-v7.sqlite").exists());
+        let table: String = store
+            .connection
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE name='adapter_event_receipts'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table, "adapter_event_receipts");
     }
 }

@@ -1,0 +1,144 @@
+   Compiling pipeline-adapters v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-adapters)
+   Compiling pipeline-engine v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-engine)
+   Compiling pipeline-api v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-api)
+   Compiling pipeline-app v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-app)
+   Compiling pipeline-cli v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.19s
+     Running unittests src\lib.rs (target\debug\deps\pipeline_adapters-0fc20ed3fa6053e9.exe)
+
+running 5 tests
+test opencode::tests::live_owned_server_uses_password_and_stops_on_drop ... ignored, requires installed OpenCode executable; does not start model inference
+test opencode::tests::live_windows_session_smoke_without_model_inference ... ignored, requires a local OpenCode server; does not start model inference
+test opencode::tests::sse_frames_and_permission_versions_normalize_without_approval ... ok
+test opencode::tests::protocol_fixture_covers_probe_start_steer_stop_recovery_and_permissions ... ok
+test opencode::tests::loopback_only_and_outage_are_explicit ... ok
+
+test result: ok. 3 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 2.01s
+
+     Running unittests src\lib.rs (target\debug\deps\pipeline_api-553f47258a2e6d15.exe)
+
+running 3 tests
+test tests::rejects_non_loopback_bind ... ok
+test tests::loopback_route_enforces_grant_and_revision_contract ... ok
+test tests::http_route_requires_bearer_token_and_valid_body ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+
+     Running unittests src\main.rs (target\debug\deps\pipeline_app-dc311b9f2820a6ce.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target\debug\deps\pipeline_cli-0d4189b4bf9715e2.exe)
+
+running 1 test
+test tests::cli_protocol_passes_token_in_header_and_json_in_body ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\pipeline_domain-c30c7026b947879b.exe)
+
+running 3 tests
+test plan::tests::milestones_require_real_unique_tasks ... ok
+test plan::tests::every_two_and_three_node_blocking_cycle_is_rejected ... ok
+test plan::tests::four_node_graphs_match_topological_sort ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running unittests src\lib.rs (target\debug\deps\pipeline_engine-3a0ea77475e46d92.exe)
+
+running 10 tests
+test tests::approved_plan_service_updates_portfolio_and_exports_scope ... ok
+test tests::idea_to_approved_brief_journey_survives_restart_and_revisions ... ok
+test scheduler::tests::preflight_requires_harness_approved_scope_and_limits ... ok
+test scheduler::tests::preflight_rejects_custom_checkout_filter_before_recording_intent ... ok
+test tests::imports_two_repositories_without_touching_source_and_persists ... ok
+test scheduler::tests::local_actions_are_checkout_scoped_and_run_state_is_revision_checked ... ok
+test scheduler::tests::opencode_permission_event_is_deduplicated_and_waits_for_owner ... ok
+test scheduler::tests::approving_new_scope_interrupts_run_and_revokes_pending_actions ... ok
+test scheduler::tests::policy_denial_survives_restart_and_approval_is_exact_and_single_use ... ok
+test scheduler::tests::worktree_run_reconciles_partial_work_without_replaying_actions ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.14s
+
+     Running unittests src\lib.rs (target\debug\deps\pipeline_store-d329d5c92be07d39.exe)
+
+running 30 tests
+test agent::tests::read_redaction_masks_credential_fields_and_bearer_text ... ok
+test agent::tests::question_is_deduplicated_and_blocks_assigned_task ... ok
+test agent::tests::expired_token_and_token_in_payload_are_denied ... ok
+test agent::tests::artifact_path_and_hash_are_enforced_and_secrets_are_rejected ... ok
+test agent::tests::replay_is_read_only_and_conflicting_replay_and_stale_revision_fail ... ok
+test agent::tests::grant_rejects_invalid_scope_and_expiry_and_token_is_not_exported ... ok
+test agent::tests::invalid_token_cross_project_and_cross_task_are_denied ... ok
+test agent::tests::scope_change_invalidates_run_and_denial_log_redacts_untrusted_fields ... ok
+test agent::tests::all_contract_operations_use_scoped_records ... ok
+test decisions::tests::decision_audit_and_revision_bound_owner_review ... ok
+test decisions::tests::inbox_priority_project_scope_rejection_and_transactional_audit ... ok
+test discovery::tests::incomplete_brief_cannot_be_approved ... ok
+test discovery::tests::approval_is_revision_bound_hashed_and_atomic_with_audit ... ok
+test decisions::tests::rejection_and_supersession_keep_prior_versions_and_audit ... ok
+test plan::tests::invalid_graph_conflict_and_audit_failure_do_not_mutate_scope ... ok
+test plan::tests::plan_approval_waits_for_latest_brief ... ok
+test tests::failed_migration_rolls_back_all_schema_changes ... ok
+test plan::tests::graph_and_completion_follow_approved_scope_and_evidence ... ok
+test tests::project_changes_are_atomic_and_revision_checked ... ok
+test tests::portfolio_metrics_use_only_active_scope_and_accepted_weight ... ok
+test tests::activity_failure_rolls_back_project_creation ... ok
+test tests::backup_restore_and_export_round_trip ... ok
+test tests::upgrade_backup_preserves_previous_database ... ok
+test runs::tests::v6_runs_migrate_to_state_machine_and_keep_backup ... ok
+test runs::tests::v7_adapter_receipts_upgrade_with_backup ... ok
+test tests::file_store_survives_reopen_and_audit_cannot_be_rewritten ... ok
+test tests::upgrades_v1_and_creates_preupgrade_backup ... ok
+test tests::upgrades_v3_task_rows_and_keeps_preupgrade_backup ... ok
+test tests::upgrades_v4_decisions_and_keeps_preupgrade_backup ... ok
+test plan::tests::weighted_completion_matches_every_accepted_subset ... ok
+
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.63s
+
+     Running unittests src\lib.rs (target\debug\deps\pipeline_terminal-0b78a208eaf1dc7c.exe)
+
+running 3 tests
+test tests::parser_handles_ansi_unicode_and_scrollback ... ok
+test tests::shell_starts_in_selected_folder_and_exits ... ok
+test tests::noisy_command_is_drained_in_bounded_chunks_and_close_reaps_shell ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.20s
+
+   Doc-tests pipeline_adapters
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests pipeline_api
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests pipeline_domain
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests pipeline_engine
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests pipeline_store
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests pipeline_terminal
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

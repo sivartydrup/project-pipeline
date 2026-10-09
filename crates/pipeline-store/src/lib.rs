@@ -18,7 +18,7 @@ pub use decisions::{ActivityRecord, DecisionInput, DecisionRecord, InboxItem};
 mod plan;
 pub use plan::{CriterionRecord, PlanRecord, PlanStatus, TaskRecord};
 
-const CURRENT_SCHEMA_VERSION: i64 = 7;
+const CURRENT_SCHEMA_VERSION: i64 = 8;
 const INITIAL_SCHEMA: &str = include_str!("../migrations/001_initial.sql");
 const PROJECT_GIT_SCHEMA: &str = include_str!("../migrations/002_project_git.sql");
 const DISCOVERY_SCHEMA: &str = include_str!("../migrations/003_discovery.sql");
@@ -26,6 +26,7 @@ const PLAN_SCHEMA: &str = include_str!("../migrations/004_plan.sql");
 const DECISIONS_SCHEMA: &str = include_str!("../migrations/005_decisions.sql");
 const AGENT_BRIDGE_SCHEMA: &str = include_str!("../migrations/006_agent_bridge.sql");
 const SCHEDULER_POLICY_SCHEMA: &str = include_str!("../migrations/007_scheduler_policy.sql");
+const OPENCODE_ADAPTER_SCHEMA: &str = include_str!("../migrations/008_opencode_adapter.sql");
 const EXPORT_TABLES: &[&str] = &[
     "projects",
     "brief_revisions",
@@ -49,6 +50,7 @@ const EXPORT_TABLES: &[&str] = &[
     "run_checkpoints",
     "run_limits",
     "policy_requests",
+    "adapter_event_receipts",
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -496,6 +498,9 @@ fn migrate(connection: &mut Connection) -> Result<()> {
     }
     if version < 7 {
         apply_migration(connection, 7, SCHEDULER_POLICY_SCHEMA)?;
+    }
+    if version < 8 {
+        apply_migration(connection, 8, OPENCODE_ADAPTER_SCHEMA)?;
     }
     Ok(())
 }

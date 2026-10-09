@@ -963,4 +963,63 @@ mod tests {
         );
         assert!(Path::new(&start.packet.checkout_path).exists());
     }
+
+    #[test]
+    fn opencode_permission_event_is_deduplicated_and_waits_for_owner() {
+        use pipeline_adapters::{EventKind, NormalizedEvent, OpenCodeAdapter, RunHandle};
+
+        let (folder, database, project_id) = fixture();
+        let mut engine = ProjectEngine::open(&database).unwrap();
+        let start = engine
+            .prepare_agent_run_at(
+                &project_id,
+                "task",
+                true,
+                &ops(),
+                limits(),
+                &folder.path().join("worktrees"),
+            )
+            .unwrap();
+        engine
+            .store
+            .attach_adapter_session(&start.run.id, start.run.revision, "ses_fixture")
+            .unwrap();
+        engine
+            .transition_agent_run(&start.run.id, start.run.revision, "running")
+            .unwrap();
+        let run = RunHandle {
+            run_id: start.run.id.clone(),
+            session_id: "ses_fixture".into(),
+            checkout: PathBuf::from(start.packet.checkout_path),
+        };
+        let event = NormalizedEvent {
+            external_id: Some("evt_fixture".into()),
+            session_id: "ses_fixture".into(),
+            kind: EventKind::PermissionRequest,
+            summary: "OpenCode requests bash permission".into(),
+            permission_id: Some("per_fixture".into()),
+            permission_class: Some("unknown_external".into()),
+            permission_target: Some("per_fixture: git push".into()),
+            permission_digest_material: Some("exact action".into()),
+        };
+        let adapter = OpenCodeAdapter::connect("http://127.0.0.1:1/", None, "1.18.30").unwrap();
+        let first = engine
+            .observe_opencode_event(&adapter, &run, event.clone())
+            .unwrap();
+        assert!(matches!(
+            first.permission,
+            Some(crate::OpenCodePermissionOutcome::Pending(_))
+        ));
+        assert_eq!(
+            engine.store.get_run(&run.run_id).unwrap().state,
+            "waiting_for_input"
+        );
+        assert_eq!(engine.store.latest_run_cursor(&run.run_id).unwrap(), 1);
+        let repeated = engine
+            .observe_opencode_event(&adapter, &run, event)
+            .unwrap();
+        assert!(repeated.sequence.is_none());
+        assert!(repeated.permission.is_none());
+        assert_eq!(engine.store.latest_run_cursor(&run.run_id).unwrap(), 1);
+    }
 }

@@ -1,0 +1,16 @@
+   Compiling pipeline-adapters v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-adapters)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.18s
+     Running unittests src\lib.rs (target\debug\deps\pipeline_adapters-8d2a99f8d79b53be.exe)
+
+running 2 tests
+test opencode::tests::live_owned_server_uses_password_and_stops_on_drop ... ok
+CAPABILITY_REPORT={"health":"Ready","version":"1.18.30","detail":"tested OpenCode protocol available","can_resume":true,"can_steer":true,"can_stop":true,"can_stream":true,"can_diff":true,"can_reply_permissions":true} RUN_LOG={"aborted":true,"deleted":true,"diff_files":0,"model_inference":false,"recovery":"idle","session_created":true,"sse_deleted_event":true}
+test opencode::tests::live_windows_session_smoke_without_model_inference ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 4.54s
+
+   Doc-tests pipeline_adapters
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

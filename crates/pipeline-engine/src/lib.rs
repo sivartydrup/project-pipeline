@@ -16,7 +16,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 use uuid::Uuid;
+mod opencode;
 mod scheduler;
+pub use opencode::{OpenCodeObservation, OpenCodePermissionOutcome};
 pub use scheduler::{
     ActionClass, ActionSpec, PolicyOutcome, RecoveryRecord, RunLimits, RunStart, TaskPacket,
 };
@@ -39,6 +41,8 @@ pub enum EngineError {
     RunPreflight(String),
     #[error("Git operation failed: {0}")]
     Git(String),
+    #[error(transparent)]
+    Adapter(#[from] pipeline_adapters::AdapterError),
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
