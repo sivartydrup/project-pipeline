@@ -1,0 +1,13 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.26s
+     Running unittests src\lib.rs (target\debug\deps\pipeline_engine-4bd7f859dff40d37.exe)
+
+running 6 tests
+test scheduler::tests::preflight_requires_harness_approved_scope_and_limits ... ok
+test scheduler::tests::preflight_rejects_custom_checkout_filter_before_recording_intent ... ok
+test scheduler::tests::policy_denial_survives_restart_and_approval_is_exact_and_single_use ... ok
+test scheduler::tests::local_actions_are_checkout_scoped_and_run_state_is_revision_checked ... ok
+test scheduler::tests::approving_new_scope_interrupts_run_and_revokes_pending_actions ... ok
+RECOVERY_RECORD={"changed_entries":1,"checkpoint_state":"running","event_cursor":1,"state":"interrupted","task_revision":2}
+test scheduler::tests::worktree_run_reconciles_partial_work_without_replaying_actions ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 1.90s

@@ -29,7 +29,7 @@ const OPERATIONS: &[&str] = &[
     "release.propose",
 ];
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AgentCommand {
     #[serde(default)]
     pub token: String,
@@ -46,6 +46,22 @@ pub struct AgentCommand {
     pub payload: Value,
 }
 
+impl std::fmt::Debug for AgentCommand {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AgentCommand")
+            .field("project_id", &self.project_id)
+            .field("run_id", &self.run_id)
+            .field("operation", &self.operation)
+            .field("idempotency_key", &self.idempotency_key)
+            .field("expected_revision", &self.expected_revision)
+            .field("target_id", &self.target_id)
+            .field("token", &"[REDACTED]")
+            .field("payload", &"[REDACTED]")
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentReply {
     pub result: Value,
@@ -54,11 +70,22 @@ pub struct AgentReply {
     pub replayed: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AgentGrant {
     pub run_id: String,
     pub token: String,
     pub expires_at_unix: i64,
+}
+
+impl std::fmt::Debug for AgentGrant {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AgentGrant")
+            .field("run_id", &self.run_id)
+            .field("token", &"[REDACTED]")
+            .field("expires_at_unix", &self.expires_at_unix)
+            .finish()
+    }
 }
 
 type GrantTuple = (String, String, i64, String, String, i64, Option<String>);
@@ -186,13 +213,13 @@ impl Store {
         let project = self
             .get_project(project_id)?
             .ok_or_else(|| StoreError::NotFound(project_id.into()))?;
-        let project_path = fs::canonicalize(&project.path)
+        let project_path = dunce::canonicalize(&project.path)
             .map_err(|_| StoreError::AgentDenied("project path missing".into()))?;
-        let checkout_path = fs::canonicalize(checkout)
+        let checkout_path = dunce::canonicalize(checkout)
             .map_err(|_| StoreError::AgentDenied("checkout path missing".into()))?;
-        if checkout_path != project_path || !checkout_path.is_dir() {
+        if !checkout_path.is_dir() {
             return Err(StoreError::AgentDenied(
-                "checkout must be the selected project until P12 isolation".into(),
+                "checkout path must be a directory".into(),
             ));
         }
         let task = self
@@ -203,6 +230,17 @@ impl Store {
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let managed = checkout_path != project_path;
+        if managed {
+            let registered: bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM managed_checkouts
+                WHERE project_id=?1 AND task_id=?2 AND path=?3 AND state='prepared' AND run_id IS NULL)",
+                params![project_id,task.id,checkout_path.to_string_lossy()],|row|row.get(0))?;
+            if !registered {
+                return Err(StoreError::AgentDenied(
+                    "checkout is not a prepared managed worktree".into(),
+                ));
+            }
+        }
         let still_ready: bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM tasks t JOIN projects p ON p.id=t.project_id
             WHERE t.id=?1 AND t.project_id=?2 AND t.scope_revision=p.active_scope_revision AND t.status='ready'
               AND NOT EXISTS(SELECT 1 FROM dependencies d JOIN tasks prerequisite ON prerequisite.id=d.to_task_id
@@ -212,24 +250,37 @@ impl Store {
             return Err(StoreError::AgentDenied("task changed before grant".into()));
         }
         let active: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM agent_capabilities WHERE project_id=?1 AND revoked_at IS NULL AND expires_at_unix>?2)",
-            params![project_id, now()], |row| row.get(0))?;
+            "SELECT EXISTS(SELECT 1 FROM agent_runs WHERE project_id=?1 AND state IN ('queued','starting','running','waiting_for_input','review'))",
+            [project_id], |row| row.get(0))?;
         if active {
             return Err(StoreError::AgentDenied(
-                "project already has an active run grant".into(),
+                "project already has an active run".into(),
             ));
+        }
+        if !managed {
+            let pending: bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM managed_checkouts WHERE project_id=?1 AND state IN ('intent','prepared','active'))",
+                [project_id],|row|row.get(0))?;
+            if pending {
+                return Err(StoreError::AgentDenied(
+                    "project has a pending managed checkout".into(),
+                ));
+            }
         }
         let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
         let run_id = Uuid::new_v4().to_string();
         let expiry = now() + ttl_seconds;
         tx.execute(
             "INSERT INTO agent_runs(id,project_id,task_id,harness,checkout_path,state,started_at)
-                    VALUES (?1,?2,?3,'local-bridge',?4,'ready',CURRENT_TIMESTAMP)",
+                    VALUES (?1,?2,?3,'local-bridge',?4,'queued',CURRENT_TIMESTAMP)",
             params![run_id, project_id, task.id, checkout_path.to_string_lossy()],
         )?;
         tx.execute("INSERT INTO agent_capabilities(token_hash,project_id,task_id,scope_revision,run_id,operations_json,expires_at_unix)
                     VALUES (?1,?2,?3,?4,?5,?6,?7)",
             params![digest(&token),project_id,task.id,task.scope_revision,run_id,serde_json::to_string(operations)?,expiry])?;
+        if managed {
+            tx.execute("UPDATE managed_checkouts SET state='active',run_id=?1,updated_at=CURRENT_TIMESTAMP WHERE project_id=?2 AND task_id=?3 AND path=?4 AND state='prepared'",
+                params![run_id,project_id,task.id,checkout_path.to_string_lossy()])?;
+        }
         insert_event(
             &tx,
             project_id,
@@ -261,7 +312,8 @@ impl Store {
             .optional()?
             .ok_or_else(|| StoreError::NotFound(run_id.into()))?;
         tx.execute("UPDATE agent_capabilities SET revoked_at=CURRENT_TIMESTAMP WHERE run_id=?1 AND revoked_at IS NULL",[run_id])?;
-        tx.execute("UPDATE agent_runs SET state='closed',ended_at=CURRENT_TIMESTAMP,revision=revision+1 WHERE id=?1 AND state!='closed'",[run_id])?;
+        tx.execute("UPDATE agent_runs SET state='cancelled',ended_at=CURRENT_TIMESTAMP,revision=revision+1 WHERE id=?1 AND state NOT IN ('completed','failed','cancelled','interrupted')",[run_id])?;
+        tx.execute("UPDATE managed_checkouts SET state='retained',updated_at=CURRENT_TIMESTAMP WHERE run_id=?1 AND state='active'",[run_id])?;
         let revision: i64 = tx.query_row(
             "SELECT revision FROM agent_runs WHERE id=?1",
             [run_id],
@@ -276,7 +328,7 @@ impl Store {
             run_id,
             revision,
             None,
-            Some(json!({"state":"closed"})),
+            Some(json!({"state":"cancelled"})),
             run_id,
         )?;
         tx.commit()?;
@@ -1147,12 +1199,14 @@ mod tests {
 
     #[test]
     fn expired_token_and_token_in_payload_are_denied() {
-        let (mut store, _folder, grant) = setup();
+        let (mut store, folder, grant) = setup();
         let leak = command(
             &grant,
             "run.progress",
             json!({"status":"work","next_action":grant.token}),
         );
+        assert!(!format!("{grant:?}").contains(&grant.token));
+        assert!(!format!("{leak:?}").contains(&grant.token));
         assert!(store.agent_command(&leak).is_err());
         assert!(!store.export_json().unwrap().contains(&grant.token));
         store
@@ -1165,6 +1219,11 @@ mod tests {
         assert!(
             store
                 .agent_command(&command(&grant, "project.get", json!({})))
+                .is_err()
+        );
+        assert!(
+            store
+                .issue_agent_grant("p", "T", folder.path(), &["task.get".into()], 30)
                 .is_err()
         );
     }

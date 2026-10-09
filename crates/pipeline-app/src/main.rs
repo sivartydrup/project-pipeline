@@ -174,7 +174,12 @@ impl Default for DesktopApp {
                     .transpose()
                     .map_err(|error| error.to_string())
                     .and_then(|_| {
-                        ProjectEngine::open(&database).map_err(|error| error.to_string())
+                        let mut engine =
+                            ProjectEngine::open(&database).map_err(|error| error.to_string())?;
+                        engine
+                            .reconcile_interrupted_runs()
+                            .map_err(|error| error.to_string())?;
+                        Ok(engine)
                     });
                 match result {
                     Ok(engine) => {
@@ -486,6 +491,37 @@ impl DesktopApp {
                 if let Some(items) = inbox {
                     self.global_inbox = items;
                 }
+            }
+            Err(error) => self.decision_message = Some(error.to_string()),
+        }
+    }
+
+    fn run_policy_review(&mut self, id: &str, revision: i64, approve: bool) {
+        let (Some(engine), Some(project_id)) =
+            (self.engine.as_mut(), self.selected_project.as_deref())
+        else {
+            return;
+        };
+        let expiry = if approve {
+            Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64
+                    + 900,
+            )
+        } else {
+            None
+        };
+        match engine.resolve_action_request(id, revision, approve, expiry) {
+            Ok(_) => {
+                self.review = engine.load_review(project_id).ok();
+                self.global_inbox = engine.global_inbox().unwrap_or_default();
+                self.decision_message = Some(if approve {
+                    "Scoped action approved for one use".into()
+                } else {
+                    "Action denied".into()
+                });
             }
             Err(error) => self.decision_message = Some(error.to_string()),
         }
@@ -1507,6 +1543,7 @@ impl DesktopApp {
             return;
         };
         let mut action = None;
+        let mut policy_action: Option<(String, i64, bool)> = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.heading("Owner inbox");
             if review.inbox.is_empty() {
@@ -1527,6 +1564,30 @@ impl DesktopApp {
                 });
             }
             ui.separator();
+            if !review.policy_requests.is_empty() {
+                ui.heading("Scoped action requests");
+                for request in &review.policy_requests {
+                    ui.group(|ui| {
+                        ui.strong(&request.effect_summary);
+                        ui.label(format!("Action: {}", request.action_class));
+                        ui.label(format!("Exact target: {}", request.target));
+                        ui.label(format!(
+                            "Run: {} · Scope revision: {}",
+                            request.run_id, request.scope_revision
+                        ));
+                        ui.label(format!("Command digest: {}", request.command_digest));
+                        ui.horizontal(|ui| {
+                            if ui.button("Approve once (15 min)").clicked() {
+                                policy_action = Some((request.id.clone(), request.revision, true));
+                            }
+                            if ui.button("Deny").clicked() {
+                                policy_action = Some((request.id.clone(), request.revision, false));
+                            }
+                        });
+                    });
+                }
+                ui.separator();
+            }
             ui.heading(if self.editing_decision.is_some() {
                 "Edit proposed decision"
             } else {
@@ -1693,6 +1754,9 @@ impl DesktopApp {
         });
         if let Some(action) = action {
             self.run_decision_action(action);
+        }
+        if let Some((id, revision, approve)) = policy_action {
+            self.run_policy_review(&id, revision, approve);
         }
     }
 

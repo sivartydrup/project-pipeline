@@ -10,19 +10,22 @@ use std::time::Duration;
 mod agent;
 mod discovery;
 pub use agent::{AgentCommand, AgentGrant, AgentReply};
+mod runs;
 pub use discovery::{BriefRecord, BriefStatus, ResearchInput, ResearchRecord};
+pub use runs::{CheckoutRecord, PolicyRequestRecord, RunCheckpoint, RunRecord};
 mod decisions;
 pub use decisions::{ActivityRecord, DecisionInput, DecisionRecord, InboxItem};
 mod plan;
 pub use plan::{CriterionRecord, PlanRecord, PlanStatus, TaskRecord};
 
-const CURRENT_SCHEMA_VERSION: i64 = 6;
+const CURRENT_SCHEMA_VERSION: i64 = 7;
 const INITIAL_SCHEMA: &str = include_str!("../migrations/001_initial.sql");
 const PROJECT_GIT_SCHEMA: &str = include_str!("../migrations/002_project_git.sql");
 const DISCOVERY_SCHEMA: &str = include_str!("../migrations/003_discovery.sql");
 const PLAN_SCHEMA: &str = include_str!("../migrations/004_plan.sql");
 const DECISIONS_SCHEMA: &str = include_str!("../migrations/005_decisions.sql");
 const AGENT_BRIDGE_SCHEMA: &str = include_str!("../migrations/006_agent_bridge.sql");
+const SCHEDULER_POLICY_SCHEMA: &str = include_str!("../migrations/007_scheduler_policy.sql");
 const EXPORT_TABLES: &[&str] = &[
     "projects",
     "brief_revisions",
@@ -42,6 +45,10 @@ const EXPORT_TABLES: &[&str] = &[
     "release_candidates",
     "activity_events",
     "agent_denials",
+    "managed_checkouts",
+    "run_checkpoints",
+    "run_limits",
+    "policy_requests",
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -126,6 +133,10 @@ pub enum StoreError {
     InvalidSupersession,
     #[error("agent request denied: {0}")]
     AgentDenied(String),
+    #[error("run state transition denied: {0}")]
+    RunTransition(String),
+    #[error("policy action denied: {0}")]
+    PolicyDenied(String),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -482,6 +493,9 @@ fn migrate(connection: &mut Connection) -> Result<()> {
     }
     if version < 6 {
         apply_migration(connection, 6, AGENT_BRIDGE_SCHEMA)?;
+    }
+    if version < 7 {
+        apply_migration(connection, 7, SCHEDULER_POLICY_SCHEMA)?;
     }
     Ok(())
 }

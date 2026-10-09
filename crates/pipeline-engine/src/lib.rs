@@ -8,13 +8,18 @@ use pipeline_domain::{ProjectHealth, ProjectStage};
 use pipeline_store::Store;
 pub use pipeline_store::StoreError;
 pub use pipeline_store::{
-    ActivityRecord, AgentCommand, AgentGrant, AgentReply, BriefRecord, DecisionInput,
-    DecisionRecord, InboxItem, PlanRecord, ResearchInput, ResearchRecord, TaskRecord,
+    ActivityRecord, AgentCommand, AgentGrant, AgentReply, BriefRecord, CheckoutRecord,
+    DecisionInput, DecisionRecord, InboxItem, PlanRecord, PolicyRequestRecord, ResearchInput,
+    ResearchRecord, RunCheckpoint, RunRecord, TaskRecord,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 use uuid::Uuid;
+mod scheduler;
+pub use scheduler::{
+    ActionClass, ActionSpec, PolicyOutcome, RecoveryRecord, RunLimits, RunStart, TaskPacket,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -30,6 +35,10 @@ pub enum EngineError {
     AlreadyImported,
     #[error("project name must not be empty")]
     EmptyName,
+    #[error("run preflight failed: {0}")]
+    RunPreflight(String),
+    #[error("Git operation failed: {0}")]
+    Git(String),
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
@@ -65,6 +74,7 @@ pub struct PlanView {
 #[derive(Debug, Clone)]
 pub struct ReviewView {
     pub decisions: Vec<DecisionRecord>,
+    pub policy_requests: Vec<PolicyRequestRecord>,
     pub inbox: Vec<InboxItem>,
     pub activity: Vec<ActivityRecord>,
 }
@@ -418,6 +428,7 @@ impl ProjectEngine {
     pub fn load_review(&self, project_id: &str) -> Result<ReviewView> {
         Ok(ReviewView {
             decisions: self.store.list_decisions(project_id)?,
+            policy_requests: self.store.list_pending_policy_requests(project_id)?,
             inbox: self.store.list_inbox(project_id)?,
             activity: self.store.list_activity(project_id, 100)?,
         })

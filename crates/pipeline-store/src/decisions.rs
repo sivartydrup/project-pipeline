@@ -337,6 +337,17 @@ impl Store {
 
     pub fn list_inbox(&self, project_id: &str) -> Result<Vec<InboxItem>> {
         let mut inbox = Vec::new();
+        for request in self.list_pending_policy_requests(project_id)? {
+            inbox.push(InboxItem {
+                project_id: project_id.into(),
+                kind: "policy".into(),
+                subject_id: request.id,
+                title: format!("Approve {} action", request.action_class.replace('_', " ")),
+                detail: format!("{} · {}", request.effect_summary, request.target),
+                priority: 0,
+                revision: request.revision,
+            });
+        }
         for decision in self.list_decisions(project_id)? {
             if decision.status != "proposed" {
                 continue;

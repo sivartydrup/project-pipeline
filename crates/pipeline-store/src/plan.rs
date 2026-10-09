@@ -1,4 +1,5 @@
 use super::discovery::insert_event;
+use super::runs::interrupt_project_on_scope_change;
 use super::{Result, Store, StoreError, validate_nonempty};
 use pipeline_domain::{DependencyKind, PlanContent, TaskSpec};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -294,6 +295,7 @@ impl Store {
              revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=?2",
             params![scope_revision, project_id],
         )?;
+        interrupt_project_on_scope_change(&transaction, project_id)?;
         insert_event(
             &transaction,
             project_id,

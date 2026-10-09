@@ -2318,7 +2318,9 @@ dependencies = [
  "dunce",
  "pipeline-domain",
  "pipeline-store",
+ "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.21",
  "uuid",
@@ -2328,6 +2330,7 @@ dependencies = [
 name = "pipeline-store"
 version = "0.1.0"
 dependencies = [
+ "dunce",
  "pipeline-domain",
  "rusqlite",
  "serde",
