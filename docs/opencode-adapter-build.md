@@ -17,7 +17,8 @@ OpenCode `permission.asked` and `permission.v2.asked` events become `unknown_ext
 - [Protocol and workspace test log](evidence/p13-test.log): fixture covers probe, start, steer, stop, recovery, both permission event formats, session filtering, outage, and event deduplication; schema v7→v8 upgrade creates a pre-upgrade backup.
 - [Live Windows run log and capability report](evidence/p13-live-windows.log): installed OpenCode 1.18.30 passed session create, status/diff recovery, abort, deletion, SSE session event, and owned password-protected server lifecycle. These checks did not start model inference.
 - [Clippy log](evidence/p13-clippy.log) and [desktop build log](evidence/p13-app-build.log) cover the full workspace and native app.
+- [Approved live model smoke](evidence/p13-model-smoke.log): one prompt to the $0 OpenRouter North Mini Code endpoint in a disposable checkout generated live progress, diff, and permission events. The app raised a scoped policy request, recorded denial, and sent OpenCode `reject`; no tool command was approved. The [scoped approval record](approval-p13-live-smoke-2026-10-10.md) limits this test to one prompt and no paid fallback.
 
 ## Remaining verification
 
-A model-driven live prompt, tool event, and real permission request remain **unverified**. That check sends task content to an external model provider and may incur usage charges, so it requires a recorded scoped owner approval under `AGENTS.md` and the approved action gates. The MacBook Pro M1 Max session smoke remains a release check when that machine is available. P13 cannot be accepted from the no-inference Windows smoke alone.
+The Windows model-driven permission path passed. The MacBook Pro M1 Max session smoke remains a release check when that machine is available. P14 will connect these services to owner run controls and evidence review in the desktop UI.

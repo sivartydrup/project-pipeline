@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.36s
+     Running unittests src\lib.rs (target\debug\deps\pipeline_engine-3d65ebdf8c1967cd.exe)
+
+running 1 test
+P13_MODEL_SMOKE={"event_kinds":["Unknown","Progress","Progress","Unknown","Progress","Progress","Unknown","Diff","Progress","Progress","Progress","Progress","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Unknown","Progress","Progress","Progress","PermissionRequest"],"harness_reply":"reject","model":"openrouter/cohere/north-mini-code:free","model_price_usd":0,"permission_requested":true,"policy_status":"denied","prompt_count":1,"run_event_cursor":79}
+test scheduler::tests::live_opencode_model_permission_smoke ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 15.42s

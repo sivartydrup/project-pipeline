@@ -110,7 +110,7 @@ impl OpenCodeAdapter {
         }
         let http = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(2))
-            .timeout_read(Duration::from_secs(10))
+            .timeout_read(Duration::from_secs(60))
             .timeout_write(Duration::from_secs(10))
             .build();
         Ok(Self {
@@ -233,6 +233,28 @@ impl OpenCodeAdapter {
             session_id,
             checkout,
         })
+    }
+
+    pub fn steer_with_model(
+        &self,
+        run: &RunHandle,
+        message: &str,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Result<()> {
+        self.require_ready()?;
+        if message.trim().is_empty() || provider_id.is_empty() || model_id.is_empty() {
+            return Err(AdapterError::Protocol(
+                "complete model prompt required".into(),
+            ));
+        }
+        self.post_json(
+            &format!("session/{}/prompt_async", run.session_id),
+            &run.checkout,
+            json!({"model":{"providerID":provider_id,"modelID":model_id},
+                "parts":[{"type":"text","text":message}]}),
+        )?;
+        Ok(())
     }
 
     pub fn pending_permissions(&self, run: &RunHandle) -> Result<Vec<NormalizedEvent>> {
@@ -509,7 +531,13 @@ fn normalize_event(value: &Value, session_id: &str) -> Option<NormalizedEvent> {
     };
     match kind {
         "server.connected" => event.kind = EventKind::Connected,
-        "session.status" | "message.updated" | "message.part.updated" => {
+        "session.status"
+        | "message.updated"
+        | "message.part.updated"
+        | "message.part.delta"
+        | "session.created"
+        | "session.updated"
+        | "session.deleted" => {
             event.kind = EventKind::Progress;
         }
         "session.idle" => event.kind = EventKind::Idle,
@@ -562,8 +590,14 @@ fn normalize_event(value: &Value, session_id: &str) -> Option<NormalizedEvent> {
                     .unwrap_or("unknown")
             );
         }
-        "permission.replied" => event.kind = EventKind::Progress,
-        name if name.starts_with("tool.") => event.kind = EventKind::Tool,
+        "permission.replied" | "permission.v2.replied" => event.kind = EventKind::Progress,
+        name if name.starts_with("tool.")
+            || name.starts_with("session.next.tool.")
+            || name.starts_with("session.next.shell.") =>
+        {
+            event.kind = EventKind::Tool;
+        }
+        name if name.starts_with("session.next.") => event.kind = EventKind::Progress,
         _ => {}
     }
     Some(event)
@@ -607,6 +641,19 @@ mod tests {
                 .kind,
             EventKind::PermissionRequest
         );
+        let tool = json!({"type":"session.next.tool.called",
+            "properties":{"sessionID":"ses_1","tool":"bash"}});
+        assert_eq!(
+            OpenCodeAdapter::normalize_event(&tool, "ses_1")
+                .unwrap()
+                .kind,
+            EventKind::Tool
+        );
+        let progress = json!({"type":"session.next.text.delta",
+            "properties":{"sessionID":"ses_1","delta":"untrusted content"}});
+        let progress = OpenCodeAdapter::normalize_event(&progress, "ses_1").unwrap();
+        assert_eq!(progress.kind, EventKind::Progress);
+        assert!(!progress.summary.contains("untrusted content"));
     }
 
     #[test]

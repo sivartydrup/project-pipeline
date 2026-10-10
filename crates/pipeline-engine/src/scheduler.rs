@@ -1022,4 +1022,140 @@ mod tests {
         assert!(repeated.permission.is_none());
         assert_eq!(engine.store.latest_run_cursor(&run.run_id).unwrap(), 1);
     }
+
+    #[test]
+    #[ignore = "one approved external free-model prompt; run explicitly for P13 live verification"]
+    fn live_opencode_model_permission_smoke() {
+        use pipeline_adapters::{
+            AgentAdapter, EventKind, Health, OpenCodeServer, RunHandle, RunRequest,
+        };
+        let executable = std::env::var("OPENCODE_TEST_EXECUTABLE").unwrap();
+        let (folder, database, project_id) = fixture();
+        let repo = folder.path().join("repo");
+        fs::write(
+            repo.join("opencode.json"),
+            serde_json::json!({"$schema":"https://opencode.ai/config.json",
+                "model":"openrouter/cohere/north-mini-code:free",
+                "permission":{"*":"deny","bash":"ask"}})
+            .to_string(),
+        )
+        .unwrap();
+        run_git(&repo, &["add", "opencode.json"]);
+        run_git(
+            &repo,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "-m",
+                "permission fixture",
+            ],
+        );
+        let mut engine = ProjectEngine::open(&database).unwrap();
+        let start = engine
+            .prepare_agent_run_at(
+                &project_id,
+                "task",
+                true,
+                &ops(),
+                RunLimits {
+                    wall_seconds: 120,
+                    token_budget: 2_000,
+                    token_ttl_seconds: 900,
+                },
+                &folder.path().join("worktrees"),
+            )
+            .unwrap();
+        let checkout = PathBuf::from(&start.packet.checkout_path);
+        let server = OpenCodeServer::launch(Path::new(&executable), &checkout).unwrap();
+        let adapter = server.adapter().unwrap();
+        let report = adapter.probe();
+        assert_eq!(report.health, Health::Ready);
+        let run: RunHandle = adapter
+            .start(RunRequest {
+                run_id: start.run.id.clone(),
+                checkout: checkout.clone(),
+            })
+            .unwrap();
+        engine
+            .store
+            .attach_adapter_session(&run.run_id, start.run.revision, &run.session_id)
+            .unwrap();
+        engine
+            .transition_agent_run(&run.run_id, start.run.revision, "running")
+            .unwrap();
+        let stream_adapter = server.adapter().unwrap();
+        let stream_run = run.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let stream = std::thread::spawn(move || {
+            stream_adapter.stream_events(&stream_run, |event| {
+                let stop = matches!(
+                    event.kind,
+                    EventKind::PermissionRequest | EventKind::Error | EventKind::Idle
+                );
+                sender.send(event).unwrap();
+                !stop
+            })
+        });
+        let connected = receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(connected.kind, EventKind::Connected);
+        adapter
+            .steer_with_model(
+                &run,
+                "For this single protocol smoke, call the bash tool exactly once with `git status --short` in this repository. Do not edit files, access the network, or call any other tool. If permission is requested, wait for it.",
+                "openrouter",
+                "cohere/north-mini-code:free",
+            )
+            .unwrap();
+        let mut event_kinds = Vec::new();
+        let mut permission = None;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        for _ in 0..500 {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let Ok(event) =
+                receiver.recv_timeout(remaining.min(std::time::Duration::from_secs(30)))
+            else {
+                continue;
+            };
+            event_kinds.push(format!("{:?}", event.kind));
+            let result = engine
+                .observe_opencode_event(&adapter, &run, event)
+                .unwrap();
+            if let Some(crate::OpenCodePermissionOutcome::Pending(request_id)) = result.permission {
+                permission = Some((request_id, result.event.permission_id.unwrap()));
+                break;
+            }
+            if matches!(result.event.kind, EventKind::Error | EventKind::Idle) {
+                break;
+            }
+        }
+        let (request_id, permission_id) = permission.expect("model did not request permission");
+        let request = engine.store.get_policy_request(&request_id).unwrap();
+        assert_eq!(request.status, "pending");
+        engine
+            .resolve_action_request(&request_id, request.revision, false, None)
+            .unwrap();
+        let outcome = engine
+            .resolve_pending_opencode_permission(&adapter, &run, &permission_id)
+            .unwrap();
+        assert!(matches!(outcome, crate::OpenCodePermissionOutcome::Denied));
+        let _ = adapter.stop(&run);
+        let _ = adapter.delete_session(&run);
+        let _ = stream.join().unwrap();
+        let cursor = engine.store.latest_run_cursor(&run.run_id).unwrap();
+        eprintln!(
+            "P13_MODEL_SMOKE={}",
+            serde_json::json!({"model":"openrouter/cohere/north-mini-code:free",
+                "model_price_usd":0,"prompt_count":1,"event_kinds":event_kinds,
+                "permission_requested":true,"policy_status":"denied",
+                "harness_reply":"reject","run_event_cursor":cursor})
+        );
+    }
 }
