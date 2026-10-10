@@ -1,6 +1,6 @@
 # P14 agent task and evidence review loop
 
-10 October 2026, Windows x86_64. The live end-to-end sample reached agent submission and owner review. The owner approved 15 additional verified-free-model calls and a 160,000 observed-token stop for the next disposable run after 23 of the original 25 calls were used. That run completed with 12 calls and 98,920 observed tokens. Cumulative accounting is 35/40 calls used; five remain. The owner accepted the disposable sample task after criterion verification. Backlog P14 acceptance remains a separate owner decision.
+10 October 2026, Windows x86_64. The live end-to-end sample reached agent submission and owner review. The owner approved 15 additional verified-free-model calls and a 160,000 observed-token stop for the next disposable run after 23 of the original 25 calls were used. That run completed with 12 calls and 98,920 observed tokens. Cumulative accounting is 35/40 calls used; five remain. The owner accepted the disposable sample task after criterion verification and [accepted backlog P14](approval-p14-2026-10-10.md).
 
 ## Implemented path
 
@@ -31,5 +31,4 @@
 
 ## Remaining verification
 
-1. Owner acceptance of backlog P14 is still pending. The live Windows sample task was accepted separately.
-2. Repeat the journey on the M1 Max before release, as required by the approved backlog.
+1. Repeat the journey on the M1 Max before release, as required by the approved backlog.
