@@ -391,6 +391,10 @@ impl OpenCodeAdapter {
 }
 
 fn full_pending_bash_command(messages: &Value, resource: &str) -> Option<String> {
+    // OpenCode can list several parsed shell resources (for example an echo
+    // command and a loopback address). A resource may also name only a later
+    // argument, so match every fragment against a unique pending tool input.
+    let resources: Vec<_> = resource.split(", ").collect();
     let mut commands = messages
         .as_array()?
         .iter()
@@ -410,7 +414,7 @@ fn full_pending_bash_command(messages: &Value, resource: &str) -> Option<String>
                     .flatten()
                 })
         })
-        .filter(|command| command.starts_with(resource));
+        .filter(|command| resources.iter().all(|fragment| command.contains(fragment)));
     let found = commands.next()?.to_owned();
     if commands.any(|other| other != found) {
         return None;
@@ -734,6 +738,14 @@ mod tests {
             "state":{"status":"running","input":{"command":"echo data | pipeline-cli call localhost"}}}]}]);
         assert_eq!(
             full_pending_bash_command(&messages, "echo data"),
+            Some("echo data | pipeline-cli call localhost".into())
+        );
+        assert_eq!(
+            full_pending_bash_command(&messages, "echo data, localhost"),
+            Some("echo data | pipeline-cli call localhost".into())
+        );
+        assert_eq!(
+            full_pending_bash_command(&messages, "localhost"),
             Some("echo data | pipeline-cli call localhost".into())
         );
         let ambiguous = json!([{"parts":[

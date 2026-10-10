@@ -111,7 +111,23 @@ impl ProjectEngine {
         if let Some(command) = bridge_command {
             prompt.push_str("\nFor project state operations, invoke this local bridge command with one JSON object on stdin. The token is supplied in the process environment. Do not print or copy it: ");
             prompt.push_str(command);
-            prompt.push_str("\nEvery bridge JSON object needs project_id, run_id, operation, expected_revision and, for mutations, a unique idempotency_key. The packet's task_revision is from preflight; call task.get now to obtain the current revision after the scheduler marked the task running. Use the returned revision for each later task mutation. Example read request: ");
+            if command.starts_with("& ") {
+                let task_get = serde_json::json!({
+                    "project_id": start.packet.project_id,
+                    "run_id": start.run.id,
+                    "operation": "task.get",
+                    "target_id": start.packet.task_id,
+                    "expected_revision": 0
+                })
+                .to_string()
+                .replace('\'', "''");
+                prompt.push_str("\nThe Windows shell is PowerShell. Implement the requested source change and run its tests before recording project state. When you need the bridge, a quoted executable path alone does not run; use the & call operator. Copy this exact task.get command, including Write-Output and the single quotes around JSON: Write-Output '");
+                prompt.push_str(&task_get);
+                prompt.push_str("' | ");
+                prompt.push_str(command);
+                prompt.push_str(". Do not execute the JSON alone or omit &.");
+            }
+            prompt.push_str("\nEvery bridge JSON object needs project_id, run_id, operation, expected_revision and, for mutations, a unique idempotency_key. The packet's task_revision is from preflight; call task.get before the first state mutation to obtain the current revision after the scheduler marked the task running. Use the returned revision for each later task mutation. Example read request: ");
             prompt.push_str(
                 &serde_json::json!({
                     "project_id": start.packet.project_id,

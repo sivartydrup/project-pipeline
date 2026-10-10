@@ -101,7 +101,8 @@ struct DesktopApp {
     cli_path: String,
     provider_id: String,
     model_id: String,
-    pending_permission: Option<(String, String)>,
+    token_budget_input: String,
+    pending_permissions: Vec<(String, String)>,
     last_run_refresh: Instant,
     decision_draft: DecisionInput,
     editing_decision: Option<String>,
@@ -181,7 +182,8 @@ impl Default for DesktopApp {
             }),
             provider_id: String::new(),
             model_id: String::new(),
-            pending_permission: None,
+            token_budget_input: "20000".into(),
+            pending_permissions: Vec::new(),
             last_run_refresh: Instant::now(),
             decision_draft: DecisionInput {
                 impact: "medium".into(),
@@ -499,7 +501,13 @@ impl DesktopApp {
                     RunUpdate::Started(id) => self.run_message = Some(format!("Run {id} started")),
                     RunUpdate::Event(message) => self.run_message = Some(message),
                     RunUpdate::Permission(id, summary) => {
-                        self.pending_permission = Some((id, summary));
+                        if !self
+                            .pending_permissions
+                            .iter()
+                            .any(|(pending_id, _)| pending_id == &id)
+                        {
+                            self.pending_permissions.push((id, summary));
+                        }
                         permission_changed = true;
                     }
                     RunUpdate::Finished(message) => {
@@ -525,7 +533,7 @@ impl DesktopApp {
         }
         if finished {
             self.run_control = None;
-            self.pending_permission = None;
+            self.pending_permissions.clear();
             self.refresh_runs();
             self.refresh_plan();
             self.refresh_review();
@@ -540,6 +548,14 @@ impl DesktopApp {
             self.run_message = Some("Select a project first".into());
             return;
         };
+        let Ok(token_budget) = self.token_budget_input.trim().parse::<i64>() else {
+            self.run_message = Some("Enter an observed token limit from 1 to 100,000".into());
+            return;
+        };
+        if !(1..=100_000).contains(&token_budget) {
+            self.run_message = Some("Enter an observed token limit from 1 to 100,000".into());
+            return;
+        }
         let launch = RunLaunch {
             database: data_dir.join("portfolio.sqlite"),
             evidence_dir: data_dir.join("evidence"),
@@ -549,6 +565,7 @@ impl DesktopApp {
             cli: PathBuf::from(&self.cli_path),
             provider: self.provider_id.clone(),
             model: self.model_id.clone(),
+            token_budget,
         };
         self.run_control = Some(run_worker::launch(launch));
         self.run_message = Some("Preparing approved task and isolated checkout…".into());
@@ -1974,25 +1991,36 @@ impl DesktopApp {
                 ui.label("Provider"); ui.text_edit_singleline(&mut self.provider_id);
                 ui.label("Model"); ui.text_edit_singleline(&mut self.model_id);
             });
-            ui.label("Starting approves one prompt with the selected provider and model, then sends the approved task packet. Provider charges may apply. The run stops at 15 minutes or when observed usage reaches 20,000 tokens.");
+            ui.horizontal(|ui| {
+                ui.label("Observed token limit");
+                ui.add(egui::TextEdit::singleline(&mut self.token_budget_input).desired_width(90.0));
+            });
+            ui.label("Starting approves one prompt with the selected provider and model, then sends the approved task packet. Provider charges may apply. The run stops at 15 minutes or when observed usage reaches the selected token limit (which can be exceeded between observations).");
             let selected_ready = ready.iter().any(|(id, _)| id == &self.run_task_id);
+            let token_budget = self.token_budget_input.trim().parse::<i64>().ok()
+                .filter(|value| (1..=100_000).contains(value));
             if ui.add_enabled(self.run_control.is_none() && selected_ready
-                && !self.provider_id.trim().is_empty() && !self.model_id.trim().is_empty(),
-                egui::Button::new("Approve and start run")).clicked() { self.start_run(); }
+                && !self.provider_id.trim().is_empty() && !self.model_id.trim().is_empty()
+                && token_budget.is_some(),
+                egui::Button::new(format!("Approve {}-token stop and start run", token_budget.unwrap_or(0)))).clicked() { self.start_run(); }
             if self.run_control.is_some() && ui.button("Stop run").clicked()
                 && let Some(control) = &self.run_control
             {
                 let _ = control.commands.send(RunCommand::Stop);
             }
-            if let Some((id, summary)) = &self.pending_permission {
-                ui.label(format!("Permission pending: {summary}"));
-                if ui.button("Continue after owner decision").clicked() {
-                    if let Some(control) = &self.run_control {
-                        let _ = control.commands.send(RunCommand::ContinuePermission(id.clone()));
+            let mut continued = Vec::new();
+            for (id, summary) in &self.pending_permissions {
+                ui.push_id(id, |ui| {
+                    ui.label(format!("Permission pending: {summary}"));
+                    if ui.button("Continue after owner decision").clicked() {
+                        if let Some(control) = &self.run_control {
+                            let _ = control.commands.send(RunCommand::ContinuePermission(id.clone()));
+                        }
+                        continued.push(id.clone());
                     }
-                    self.pending_permission = None;
-                }
+                });
             }
+            self.pending_permissions.retain(|(id, _)| !continued.contains(id));
         });
         if self.run_reviews.is_empty() {
             ui.label("No agent runs for this project.");

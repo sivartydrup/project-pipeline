@@ -44,6 +44,7 @@ pub struct RunLaunch {
     pub cli: PathBuf,
     pub provider: String,
     pub model: String,
+    pub token_budget: i64,
 }
 
 struct BridgeProcess(Child);
@@ -107,6 +108,9 @@ fn execute(
     if input.provider.trim().is_empty() || input.model.trim().is_empty() {
         return Err("select an explicit provider and model".into());
     }
+    if !(1..=100_000).contains(&input.token_budget) {
+        return Err("observed token limit must be between 1 and 100,000".into());
+    }
     if !input.opencode.is_file() || !input.cli.is_file() {
         return Err("OpenCode and pipeline-cli executable paths must exist".into());
     }
@@ -136,7 +140,7 @@ fn execute(
             &operations,
             RunLimits {
                 wall_seconds: 900,
-                token_budget: 20_000,
+                token_budget: input.token_budget,
                 token_ttl_seconds: 900,
             },
         )
@@ -192,6 +196,13 @@ fn run_prepared(
     adapter
         .assert_runtime_permissions(Path::new(&start.packet.checkout_path))
         .map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    let bridge_command = format!(
+        "& '{}' call {}",
+        input.cli.display().to_string().replace('\'', "''"),
+        address
+    );
+    #[cfg(not(windows))]
     let bridge_command = format!("\"{}\" call {}", input.cli.display(), address);
     let handle = engine
         .create_opencode_run_session(&adapter, start)
