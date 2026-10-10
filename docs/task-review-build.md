@@ -1,6 +1,6 @@
 # P14 agent task and evidence review loop
 
-10 October 2026, Windows x86_64. The live end-to-end sample reached agent submission and owner review. The owner approved 15 additional verified-free-model calls and a 160,000 observed-token stop for the next disposable run after 23 of the original 25 calls were used. That run completed with 12 calls and 98,920 observed tokens. Cumulative accounting is 35/40 calls used; five remain. P14 awaits the owner's criterion verification and acceptance decision.
+10 October 2026, Windows x86_64. The live end-to-end sample reached agent submission and owner review. The owner approved 15 additional verified-free-model calls and a 160,000 observed-token stop for the next disposable run after 23 of the original 25 calls were used. That run completed with 12 calls and 98,920 observed tokens. Cumulative accounting is 35/40 calls used; five remain. The owner accepted the disposable sample task after criterion verification. Backlog P14 acceptance remains a separate owner decision.
 
 ## Implemented path
 
@@ -26,10 +26,10 @@
 
 - The [live journey log](evidence/p14-live-windows.log) records the owner-approved 160,000-token run, the free-route check, exact reviewed commands, submission, and 35/40 cumulative model-call accounting. The run completed below its stop at 98,920 observed tokens.
 - The agent changed only `src/lib.rs` from subtraction to addition. Its [tracked patch](evidence/p14-run-61c5.patch) and [passing test log](evidence/p14-run-61c5-test.log) are preserved. A fresh app/CLI build, workspace tests, and Clippy passed in [build](evidence/p14-build-160k.log), [test](evidence/p14-test-160k.log), and [Clippy](evidence/p14-clippy-160k.log) logs.
-- The domain service recorded the test-log artifact, passing test, agent diff artifact, submission, and worker-captured tracked diff artifact. All three artifact hashes matched the files on disk when independently checked. The task is in `review`; the run is `completed`.
-- The rebuilt Windows desktop displayed the verified packet, current diff, submission, passing test, all three artifacts, and the Plan criterion fields. The full [headless event log](evidence/p14-headless-run-160k.log) is preserved. Criterion verification and task acceptance remain owner actions.
+- The domain service recorded the test-log artifact, passing test, agent diff artifact, submission, and worker-captured tracked diff artifact. All three artifact hashes matched the files on disk when independently checked. The run is `completed`; the owner subsequently moved the task from `review` to `accepted`.
+- The rebuilt Windows desktop displayed the verified packet, current diff, submission, passing test, all three artifacts, and the Plan criterion fields. The full [headless event log](evidence/p14-headless-run-160k.log) is preserved. The owner then verified the criterion with the test-log and worker-captured diff IDs and accepted the sample task; see [sample acceptance](approval-p14-sample-2026-10-10.md). The project displayed 1/1 tasks accepted and 100% verified completion.
 
 ## Remaining verification
 
-1. The owner reviews the one-line sample patch and passing test log, then decides whether to verify the criterion and accept the disposable task. The agent submission has not self-accepted it.
+1. Owner acceptance of backlog P14 is still pending. The live Windows sample task was accepted separately.
 2. Repeat the journey on the M1 Max before release, as required by the approved backlog.
