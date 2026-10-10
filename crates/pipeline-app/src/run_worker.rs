@@ -110,8 +110,8 @@ fn execute(
     if input.provider.trim().is_empty() || input.model.trim().is_empty() {
         return Err("select an explicit provider and model".into());
     }
-    if !(1..=100_000).contains(&input.token_budget) {
-        return Err("observed token limit must be between 1 and 100,000".into());
+    if !(1..=160_000).contains(&input.token_budget) {
+        return Err("observed token limit must be between 1 and 160,000".into());
     }
     if !input.opencode.is_file() || !input.cli.is_file() {
         return Err("OpenCode and pipeline-cli executable paths must exist".into());

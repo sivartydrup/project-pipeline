@@ -554,11 +554,11 @@ impl DesktopApp {
             return;
         };
         let Ok(token_budget) = self.token_budget_input.trim().parse::<i64>() else {
-            self.run_message = Some("Enter an observed token limit from 1 to 100,000".into());
+            self.run_message = Some("Enter an observed token limit from 1 to 160,000".into());
             return;
         };
-        if !(1..=100_000).contains(&token_budget) {
-            self.run_message = Some("Enter an observed token limit from 1 to 100,000".into());
+        if !(1..=160_000).contains(&token_budget) {
+            self.run_message = Some("Enter an observed token limit from 1 to 160,000".into());
             return;
         }
         let launch = RunLaunch {
@@ -2003,7 +2003,7 @@ impl DesktopApp {
             ui.label("Starting approves one prompt with the selected provider and model, then sends the approved task packet. Provider charges may apply. The run stops at 15 minutes or when observed usage reaches the selected token limit (which can be exceeded between observations).");
             let selected_ready = ready.iter().any(|(id, _)| id == &self.run_task_id);
             let token_budget = self.token_budget_input.trim().parse::<i64>().ok()
-                .filter(|value| (1..=100_000).contains(value));
+                .filter(|value| (1..=160_000).contains(value));
             if ui.add_enabled(self.run_control.is_none() && selected_ready
                 && !self.provider_id.trim().is_empty() && !self.model_id.trim().is_empty()
                 && token_budget.is_some(),

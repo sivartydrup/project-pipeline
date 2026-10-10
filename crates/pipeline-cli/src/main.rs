@@ -43,6 +43,16 @@ fn run() -> Result<(), String> {
             }
             Ok(())
         }
+        Some("task-retry") if args.len() == 7 => {
+            let mut engine = ProjectEngine::open(&args[2]).map_err(|e| e.to_string())?;
+            let revision = args[5].parse::<i64>().map_err(|_| "invalid task revision")?;
+            let reason = args[6].trim();
+            if reason.is_empty() { return Err("retry reason is required".into()); }
+            engine.request_task_changes(&args[3], &args[4], revision, reason)
+                .map_err(|e| e.to_string())?;
+            println!("task={} retry requested with reason", args[4]);
+            Ok(())
+        }
         Some("policy-resolve") if args.len() == 8 => {
             let mut engine = ProjectEngine::open(&args[2]).map_err(|e| e.to_string())?;
             let request = engine.load_review(&args[3]).map_err(|e| e.to_string())?
@@ -68,7 +78,7 @@ fn run() -> Result<(), String> {
                 resolved.command_digest, resolved.target);
             Ok(())
         }
-        _ => Err("usage: pipeline-cli serve <database> <127.0.0.1:port> | call <127.0.0.1:port> (JSON on stdin; token in PIPELINE_AGENT_TOKEN) | policy-list <database> <project_id> | policy-resolve <database> <project_id> <request_id> <revision> <command_digest> <approve|deny>".into()),
+        _ => Err("usage: pipeline-cli serve <database> <127.0.0.1:port> | call <127.0.0.1:port> (JSON on stdin; token in PIPELINE_AGENT_TOKEN) | policy-list <database> <project_id> | policy-resolve <database> <project_id> <request_id> <revision> <command_digest> <approve|deny> | task-retry <database> <project_id> <task_id> <task_revision> <reason>".into()),
     }
 }
 
