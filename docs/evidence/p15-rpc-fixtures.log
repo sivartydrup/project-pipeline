@@ -1,0 +1,10 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.41s
+     Running unittests src\lib.rs (target\debug\deps\pipeline_adapters-8d2a99f8d79b53be.exe)
+
+running 3 tests
+test pi_rpc::tests::framing_rejects_truncated_and_invalid_records ... ok
+test pi_rpc::tests::framing_survives_partial_utf8_and_unicode_separators ... ok
+test pi_rpc::tests::responses_are_correlated_without_swallowing_events ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
