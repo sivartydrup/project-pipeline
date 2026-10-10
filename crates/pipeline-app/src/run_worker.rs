@@ -1,5 +1,5 @@
-use pipeline_adapters::{AgentAdapter, EventKind, NormalizedEvent, OpenCodeServer};
-use pipeline_engine::{OpenCodePermissionOutcome, ProjectEngine, RunLimits};
+use pipeline_adapters::{AgentAdapter, EventKind, NormalizedEvent, OpenCodeServer, PiAdapter};
+use pipeline_engine::{OpenCodePermissionOutcome, PiPermissionOutcome, ProjectEngine, RunLimits};
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -43,6 +43,7 @@ pub struct RunLaunch {
     pub project_id: String,
     pub task_id: String,
     pub opencode: PathBuf,
+    pub pi: bool,
     pub cli: PathBuf,
     pub provider: String,
     pub model: String,
@@ -114,7 +115,7 @@ fn execute(
         return Err("observed token limit must be between 1 and 160,000".into());
     }
     if !input.opencode.is_file() || !input.cli.is_file() {
-        return Err("OpenCode and pipeline-cli executable paths must exist".into());
+        return Err("harness and pipeline-cli executable paths must exist".into());
     }
     let mut engine = ProjectEngine::open(&input.database).map_err(|e| e.to_string())?;
     let operations = [
@@ -152,7 +153,11 @@ fn execute(
         .approve_agent_prompt(&run_id, &input.provider, &input.model)
         .map_err(|e| e.to_string())?;
     let _ = updates.send(RunUpdate::Started(run_id.clone()));
-    let outcome = run_prepared(&mut engine, &input, &start, commands, updates);
+    let outcome = if input.pi {
+        run_prepared_pi(&mut engine, &input, &start, commands, updates)
+    } else {
+        run_prepared(&mut engine, &input, &start, commands, updates)
+    };
     if outcome.is_err()
         && let Ok(run) = engine.list_task_run_reviews(&input.project_id)
         && let Some(run) = run.iter().find(|run| run.run_id == run_id)
@@ -175,7 +180,8 @@ fn run_prepared(
     commands: &Receiver<RunCommand>,
     updates: &Sender<RunUpdate>,
 ) -> Result<(), String> {
-    let (_bridge, address) = bridge(&input.cli, &input.database)?;
+    let cli = input.cli.canonicalize().map_err(|e| e.to_string())?;
+    let (_bridge, address) = bridge(&cli, &input.database)?;
     let permissions = serde_json::json!({"*":"deny","read":"allow","glob":"allow",
         "grep":"allow","edit":"allow","bash":"ask"});
     let permission_config = serde_json::json!({
@@ -201,11 +207,11 @@ fn run_prepared(
     #[cfg(windows)]
     let bridge_command = format!(
         "& '{}' call {}",
-        input.cli.display().to_string().replace('\'', "''"),
+        cli.display().to_string().replace('\'', "''"),
         address
     );
     #[cfg(not(windows))]
-    let bridge_command = format!("\"{}\" call {}", input.cli.display(), address);
+    let bridge_command = format!("\"{}\" call {}", cli.display(), address);
     let handle = engine
         .create_opencode_run_session(&adapter, start)
         .map_err(|e| e.to_string())?;
@@ -395,6 +401,204 @@ fn run_prepared(
                     .map_err(|e| e.to_string())?;
                 return Err(format!(
                     "run reached observed token budget ({usage}); checkout retained"
+                ));
+            }
+        }
+    }
+}
+
+fn run_prepared_pi(
+    engine: &mut ProjectEngine,
+    input: &RunLaunch,
+    start: &pipeline_engine::RunStart,
+    commands: &Receiver<RunCommand>,
+    updates: &Sender<RunUpdate>,
+) -> Result<(), String> {
+    let cli = input.cli.canonicalize().map_err(|e| e.to_string())?;
+    let (_bridge, address) = bridge(&cli, &input.database)?;
+    let adapter = PiAdapter::launch(
+        &input.opencode,
+        Path::new(&start.packet.checkout_path),
+        &start.run.id,
+        &input.provider,
+        &input.model,
+        &[
+            ("PIPELINE_AGENT_TOKEN", &start.grant.token),
+            ("PIPELINE_AGENT_BRIDGE", &address.to_string()),
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    let bridge_command = format!(
+        "& '{}' call {}",
+        cli.display().to_string().replace('\'', "''"),
+        address
+    );
+    #[cfg(not(windows))]
+    let bridge_command = format!("\"{}\" call {}", cli.display(), address);
+    let handle = engine
+        .create_pi_run_session(&adapter, start)
+        .map_err(|e| e.to_string())?;
+    engine
+        .steer_pi_run(
+            &adapter,
+            start,
+            &handle,
+            &bridge_command,
+            &input.provider,
+            &input.model,
+        )
+        .map_err(|e| e.to_string())?;
+    let deadline = Instant::now() + Duration::from_secs(900);
+    let mut pending: HashMap<String, (String, NormalizedEvent)> = HashMap::new();
+    let mut last_policy_check = Instant::now();
+    let mut last_usage_check = Instant::now();
+    let mut settled = false;
+    loop {
+        while let Ok(command) = commands.try_recv() {
+            match command {
+                RunCommand::Stop => {
+                    engine
+                        .stop_pi_run(&adapter, &handle)
+                        .map_err(|e| e.to_string())?;
+                    let _ = updates.send(RunUpdate::Finished(
+                        "Pi run stopped; checkout retained".into(),
+                    ));
+                    return Ok(());
+                }
+                RunCommand::ContinuePermission(id) => {
+                    if let Some((_, event)) = pending.get(&id) {
+                        match engine
+                            .resolve_pi_permission(&adapter, &handle, event)
+                            .map_err(|e| e.to_string())?
+                        {
+                            PiPermissionOutcome::Pending(request_id) => {
+                                pending.get_mut(&id).unwrap().0 = request_id;
+                                let _ = updates.send(RunUpdate::Permission(
+                                    id,
+                                    "Owner decision still pending".into(),
+                                ));
+                            }
+                            outcome => {
+                                pending.remove(&id);
+                                let _ = updates.send(RunUpdate::PermissionResolved(id.clone()));
+                                let _ = updates.send(RunUpdate::Event(format!(
+                                    "Pi permission {id}: {outcome:?}"
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(event) = adapter
+            .next_event(Duration::from_millis(200))
+            .map_err(|e| e.to_string())?
+        {
+            let observation = engine
+                .observe_pi_event(&adapter, &handle, event)
+                .map_err(|e| e.to_string())?;
+            if observation.event.kind == EventKind::Error {
+                return Err(format!(
+                    "Pi protocol or extension error: {}",
+                    observation.event.summary
+                ));
+            }
+            if let Some(PiPermissionOutcome::Pending(request_id)) = observation.permission
+                && let Some(id) = observation.event.permission_id.clone()
+            {
+                pending.insert(id.clone(), (request_id, observation.event.clone()));
+                let _ = updates.send(RunUpdate::Permission(id, observation.event.summary.clone()));
+            }
+            if observation.event.kind == EventKind::Idle {
+                settled = true;
+            }
+            let _ = updates.send(RunUpdate::Event(format!(
+                "{:?}: {}",
+                observation.event.kind, observation.event.summary
+            )));
+        }
+        if last_policy_check.elapsed() >= Duration::from_millis(500) {
+            last_policy_check = Instant::now();
+            for (id, (request_id, event)) in pending.clone() {
+                let request = engine
+                    .get_action_request(&request_id)
+                    .map_err(|e| e.to_string())?;
+                if request.status == "pending" {
+                    continue;
+                }
+                match engine.resolve_pi_permission(&adapter, &handle, &event) {
+                    Ok(PiPermissionOutcome::Pending(new_id)) => {
+                        pending.get_mut(&id).unwrap().0 = new_id;
+                    }
+                    Ok(outcome) => {
+                        pending.remove(&id);
+                        let _ = updates.send(RunUpdate::PermissionResolved(id.clone()));
+                        let _ = updates
+                            .send(RunUpdate::Event(format!("Pi permission {id}: {outcome:?}")));
+                    }
+                    Err(error) => {
+                        pending.remove(&id);
+                        let _ = updates.send(RunUpdate::PermissionResolved(id.clone()));
+                        let _ = updates.send(RunUpdate::Event(format!(
+                            "Pi permission {id} needs review: {error}"
+                        )));
+                    }
+                }
+            }
+        }
+        let plan = engine
+            .load_plan(&input.project_id)
+            .map_err(|e| e.to_string())?;
+        if plan
+            .active_tasks
+            .iter()
+            .any(|task| task.logical_id == input.task_id && task.status == "review")
+        {
+            let _ = adapter.stop(&handle);
+            match engine.capture_run_diff(&handle.run_id, &input.evidence_dir) {
+                Ok(id) => {
+                    let _ = updates.send(RunUpdate::Event(format!("Captured diff artifact {id}")));
+                }
+                Err(error) => {
+                    let _ = updates.send(RunUpdate::Event(format!(
+                        "Diff capture needs review: {error}"
+                    )));
+                }
+            }
+            let current = engine
+                .get_agent_run(&handle.run_id)
+                .map_err(|e| e.to_string())?;
+            let reviewed = engine
+                .transition_agent_run(&handle.run_id, current.revision, "review")
+                .map_err(|e| e.to_string())?;
+            engine
+                .transition_agent_run(&handle.run_id, reviewed.revision, "completed")
+                .map_err(|e| e.to_string())?;
+            let _ = updates.send(RunUpdate::Finished(
+                "Pi submitted task for owner review".into(),
+            ));
+            return Ok(());
+        }
+        if settled && pending.is_empty() {
+            return Err("Pi settled without task submission; checkout retained".into());
+        }
+        if Instant::now() >= deadline {
+            let _ = engine.stop_pi_run(&adapter, &handle);
+            return Err("Pi run reached its 15 minute wall limit; checkout retained".into());
+        }
+        if last_usage_check.elapsed() >= Duration::from_secs(2) {
+            last_usage_check = Instant::now();
+            let stats = adapter
+                .command("get_session_stats", serde_json::json!({}))
+                .map_err(|e| e.to_string())?;
+            let usage = stats["data"]["tokens"]["total"]
+                .as_u64()
+                .ok_or("Pi token usage unavailable")?;
+            if usage >= start.packet.limits.token_budget as u64 {
+                let _ = engine.stop_pi_run(&adapter, &handle);
+                return Err(format!(
+                    "Pi run reached observed token budget ({usage}); checkout retained"
                 ));
             }
         }

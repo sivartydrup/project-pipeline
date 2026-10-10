@@ -98,6 +98,8 @@ struct DesktopApp {
     run_control: Option<RunControl>,
     run_task_id: String,
     opencode_path: String,
+    pi_path: String,
+    pi_selected: bool,
     cli_path: String,
     provider_id: String,
     model_id: String,
@@ -166,6 +168,8 @@ impl Default for DesktopApp {
             run_control: None,
             run_task_id: String::new(),
             opencode_path: std::env::var("PIPELINE_OPENCODE_EXE").unwrap_or_default(),
+            pi_path: std::env::var("PIPELINE_PI_EXE").unwrap_or_default(),
+            pi_selected: false,
             cli_path: std::env::var("PIPELINE_CLI_EXE").unwrap_or_else(|_| {
                 std::env::current_exe()
                     .ok()
@@ -566,7 +570,12 @@ impl DesktopApp {
             evidence_dir: data_dir.join("evidence"),
             project_id: project_id.clone(),
             task_id: self.run_task_id.clone(),
-            opencode: PathBuf::from(&self.opencode_path),
+            opencode: PathBuf::from(if self.pi_selected {
+                &self.pi_path
+            } else {
+                &self.opencode_path
+            }),
+            pi: self.pi_selected,
             cli: PathBuf::from(&self.cli_path),
             provider: self.provider_id.clone(),
             model: self.model_id.clone(),
@@ -1988,8 +1997,17 @@ impl DesktopApp {
                         ui.selectable_value(&mut self.run_task_id, id.clone(), title);
                     }
                 });
-            ui.label("OpenCode executable");
-            ui.text_edit_singleline(&mut self.opencode_path);
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.pi_selected, false, "OpenCode");
+                ui.selectable_value(&mut self.pi_selected, true, "Pi RPC");
+            });
+            if self.pi_selected {
+                ui.label("Pi executable or CLI JavaScript path (tested version 1.1.0)");
+                ui.text_edit_singleline(&mut self.pi_path);
+            } else {
+                ui.label("OpenCode executable");
+                ui.text_edit_singleline(&mut self.opencode_path);
+            }
             ui.label("Project Pipeline CLI executable");
             ui.text_edit_singleline(&mut self.cli_path);
             ui.horizontal(|ui| {
@@ -2475,6 +2493,14 @@ impl eframe::App for DesktopApp {
 }
 
 fn headless_run(args: &[String]) -> Result<(), String> {
+    headless_run_with_harness(args, false)
+}
+
+fn headless_pi_run(args: &[String]) -> Result<(), String> {
+    headless_run_with_harness(args, true)
+}
+
+fn headless_run_with_harness(args: &[String], pi: bool) -> Result<(), String> {
     if args.len() != 9 {
         return Err("usage: pipeline-app --headless-run <database> <evidence_dir> <project_id> <task_id> <opencode_exe> <pipeline_cli_exe> <provider> <model> <token_budget>".into());
     }
@@ -2484,6 +2510,7 @@ fn headless_run(args: &[String]) -> Result<(), String> {
         project_id: args[2].clone(),
         task_id: args[3].clone(),
         opencode: PathBuf::from(&args[4]),
+        pi,
         cli: PathBuf::from(&args[5]),
         provider: args[6].clone(),
         model: args[7].clone(),
@@ -2510,6 +2537,13 @@ fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).is_some_and(|arg| arg == "--headless-run") {
         if let Err(error) = headless_run(&args[2..]) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+    if args.get(1).is_some_and(|arg| arg == "--headless-pi-run") {
+        if let Err(error) = headless_pi_run(&args[2..]) {
             eprintln!("{error}");
             std::process::exit(1);
         }

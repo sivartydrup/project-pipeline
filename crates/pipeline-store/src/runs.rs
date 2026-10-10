@@ -210,7 +210,22 @@ impl Store {
         expected_revision: i64,
         session_id: &str,
     ) -> Result<()> {
-        if !session_id.starts_with("ses") || session_id.len() > 200 {
+        self.attach_harness_session(run_id, expected_revision, "opencode", session_id)
+    }
+
+    pub fn attach_harness_session(
+        &mut self,
+        run_id: &str,
+        expected_revision: i64,
+        harness: &str,
+        session_id: &str,
+    ) -> Result<()> {
+        let valid = match harness {
+            "opencode" => session_id.starts_with("ses") && session_id.len() <= 200,
+            "pi" => Uuid::parse_str(session_id).is_ok(),
+            _ => false,
+        };
+        if !valid {
             return Err(StoreError::RunTransition("invalid session ID".into()));
         }
         let tx = self
@@ -231,8 +246,8 @@ impl Store {
         }
         active_scope(&tx, &run)?;
         let changed = tx.execute(
-            "UPDATE agent_runs SET external_session_id=?1 WHERE id=?2 AND external_session_id IS NULL",
-            params![session_id, run_id],
+            "UPDATE agent_runs SET external_session_id=?1,harness=?2 WHERE id=?3 AND external_session_id IS NULL",
+            params![session_id, harness, run_id],
         )?;
         if changed != 1 {
             return Err(StoreError::RunTransition("session already attached".into()));
@@ -246,7 +261,7 @@ impl Store {
             run_id,
             run.revision,
             None,
-            Some(json!({"harness":"opencode","session_id":session_id})),
+            Some(json!({"harness":harness,"session_id":session_id})),
             run_id,
         )?;
         tx.commit()?;
@@ -328,10 +343,15 @@ impl Store {
             "INSERT INTO adapter_event_receipts(run_id,external_event_id,sequence) VALUES (?1,?2,?3)",
             params![run_id, external_event_id, sequence],
         )?;
+        let harness: String = tx.query_row(
+            "SELECT harness FROM agent_runs WHERE id=?1",
+            [run_id],
+            |row| row.get(0),
+        )?;
         insert_event(
             &tx,
             &run.project_id,
-            "opencode",
+            &harness,
             "run.adapter_event",
             "run",
             run_id,

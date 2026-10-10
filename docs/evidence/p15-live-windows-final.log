@@ -1,0 +1,305 @@
+run started: 8dd96703-b47a-469c-a9dc-6230b0578bf3
+event: Progress: agent_start
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi powershell proposed
+permission pending: 25b08e16-c89e-4f24-b7ac-b6439adeb71c: Pi requests powershell: Write-Output '{"expected_revision":0,"operation":"task.get","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b0578bf3",
+event: PermissionRequest: Pi requests powershell: Write-Output '{"expected_revision":0,"operation":"task.get","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b0578bf3",
+permission resolved: 25b08e16-c89e-4f24-b7ac-b6439adeb71c
+event: Pi permission 25b08e16-c89e-4f24-b7ac-b6439adeb71c: AllowedOnce
+event: Tool: Pi powershell finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi read proposed
+event: PermissionRequest: Pi requests read: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520
+event: Tool: Pi read finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: 2f11a0f6-5d11-46d1-8a4e-51403da21c59: Pi requests bash: ls -la "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520"
+event: PermissionRequest: Pi requests bash: ls -la "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520"
+permission resolved: 2f11a0f6-5d11-46d1-8a4e-51403da21c59
+event: Pi permission 2f11a0f6-5d11-46d1-8a4e-51403da21c59: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: 73a374f8-9dad-46a6-95e0-52617c9b23a5: Pi requests bash: find "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" -type f -name "*.rs" -o -name "*.toml" 
+event: PermissionRequest: Pi requests bash: find "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" -type f -name "*.rs" -o -name "*.toml" 
+permission resolved: 73a374f8-9dad-46a6-95e0-52617c9b23a5
+event: Pi permission 73a374f8-9dad-46a6-95e0-52617c9b23a5: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi read proposed
+event: PermissionRequest: Pi requests read: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520/src/lib.rs
+event: Tool: Pi read finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi read proposed
+event: PermissionRequest: Pi requests read: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520/Cargo.toml
+event: Tool: Pi read finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: 7e46059a-e099-4ca3-8954-ee99be3e7c94: Pi requests bash: find "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" -type f -name "*.rs" | xargs grep -l "t
+event: PermissionRequest: Pi requests bash: find "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" -type f -name "*.rs" | xargs grep -l "t
+permission resolved: 7e46059a-e099-4ca3-8954-ee99be3e7c94
+event: Pi permission 7e46059a-e099-4ca3-8954-ee99be3e7c94: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: 34a8027b-fea0-42a9-b259-bc85ace694d1: Pi requests bash: find "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" -type d -name "tests" -o -name "*test*"
+event: PermissionRequest: Pi requests bash: find "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" -type d -name "tests" -o -name "*test*"
+permission resolved: 34a8027b-fea0-42a9-b259-bc85ace694d1
+event: Pi permission 34a8027b-fea0-42a9-b259-bc85ace694d1: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: d1fcf619-9f87-4879-8a8e-5a616257ae8c: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" && cargo test 2>&1 | head -50
+event: PermissionRequest: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" && cargo test 2>&1 | head -50
+permission resolved: d1fcf619-9f87-4879-8a8e-5a616257ae8c
+event: Pi permission d1fcf619-9f87-4879-8a8e-5a616257ae8c: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi edit proposed
+event: PermissionRequest: Pi requests edit: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520/src/lib.rs
+event: Tool: Pi edit finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: 7de862f7-ad69-47b4-8d75-f9e6d1f0d210: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" && cargo test 2>&1
+event: PermissionRequest: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" && cargo test 2>&1
+permission resolved: 7de862f7-ad69-47b4-8d75-f9e6d1f0d210
+event: Pi permission 7de862f7-ad69-47b4-8d75-f9e6d1f0d210: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: 6bdaf77e-2452-4224-a39c-6c63238cc01c: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" && cargo test --quiet > "test-log.txt" 2>
+event: PermissionRequest: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" && cargo test --quiet > "test-log.txt" 2>
+permission resolved: 6bdaf77e-2452-4224-a39c-6c63238cc01c
+event: Pi permission 6bdaf77e-2452-4224-a39c-6c63238cc01c: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi read proposed
+event: PermissionRequest: Pi requests read: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520/test-log.txt
+event: Tool: Pi read finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: dbeaa76f-6ea1-4be5-8694-74adf9104374: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" && certutil -hashfile "test-log.txt" SHA2
+event: PermissionRequest: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" && certutil -hashfile "test-log.txt" SHA2
+permission resolved: dbeaa76f-6ea1-4be5-8694-74adf9104374
+event: Pi permission dbeaa76f-6ea1-4be5-8694-74adf9104374: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi read proposed
+event: PermissionRequest: Pi requests read: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520/test-log-hash.txt
+event: Tool: Pi read finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: 809b0754-5e11-4c11-aea8-51901b47707a: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" && echo -n "b5632030bc9ded9e8b1e556400bc4
+event: PermissionRequest: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" && echo -n "b5632030bc9ded9e8b1e556400bc4
+permission resolved: 809b0754-5e11-4c11-aea8-51901b47707a
+event: Pi permission 809b0754-5e11-4c11-aea8-51901b47707a: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi powershell proposed
+permission pending: a217163d-2e3f-4da7-b13b-feb1b042ad3b: Pi requests powershell: Write-Output '{"expected_revision":5,"operation":"artifact.attach","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b05
+event: PermissionRequest: Pi requests powershell: Write-Output '{"expected_revision":5,"operation":"artifact.attach","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b05
+permission resolved: a217163d-2e3f-4da7-b13b-feb1b042ad3b
+event: Pi permission a217163d-2e3f-4da7-b13b-feb1b042ad3b: AllowedOnce
+event: Tool: Pi powershell finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: e4aa19cc-6b0f-495b-aa20-671534e66ae7: Pi requests bash: python3 -c "import uuid; print(str(uuid.uuid4()))"
+event: PermissionRequest: Pi requests bash: python3 -c "import uuid; print(str(uuid.uuid4()))"
+permission resolved: e4aa19cc-6b0f-495b-aa20-671534e66ae7
+event: Pi permission e4aa19cc-6b0f-495b-aa20-671534e66ae7: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi powershell proposed
+permission pending: dee8cb42-75b4-4883-9b22-871b05f2d310: Pi requests powershell: Write-Output '{"expected_revision":5,"operation":"artifact.attach","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b05
+event: PermissionRequest: Pi requests powershell: Write-Output '{"expected_revision":5,"operation":"artifact.attach","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b05
+permission resolved: dee8cb42-75b4-4883-9b22-871b05f2d310
+event: Pi permission dee8cb42-75b4-4883-9b22-871b05f2d310: AllowedOnce
+event: Tool: Pi powershell finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi powershell proposed
+event: PermissionRequest: Pi requests powershell: Write-Output '{"expected_revision":0,"operation":"task.get","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b0578bf3",
+event: Tool: Pi powershell finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi powershell proposed
+event: PermissionRequest: Pi requests powershell: Write-Output '{"expected_revision":0,"operation":"task.get","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b0578bf3",
+event: Tool: Pi powershell finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+event: PermissionRequest: Pi requests bash: python3 -c "import uuid; print(str(uuid.uuid4()))"
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi read proposed
+event: PermissionRequest: Pi requests read: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520/test-log.txt
+event: Tool: Pi read finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: d95bd430-b3cb-48e5-8a4e-7ef2b94221b9: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" && cargo test -- --list 2>&1 | head -20
+event: PermissionRequest: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/8d5a3aee-6e03-4fbd-a8d1-715233c8d520" && cargo test -- --list 2>&1 | head -20
+permission resolved: d95bd430-b3cb-48e5-8a4e-7ef2b94221b9
+event: Pi permission d95bd430-b3cb-48e5-8a4e-7ef2b94221b9: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi powershell proposed
+permission pending: 113162c6-a5aa-41b0-b90d-e979feb6f4a4: Pi requests powershell: Write-Output '{"expected_revision":0,"operation":"project.context","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b05
+event: PermissionRequest: Pi requests powershell: Write-Output '{"expected_revision":0,"operation":"project.context","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b05
+permission resolved: 113162c6-a5aa-41b0-b90d-e979feb6f4a4
+event: Pi permission 113162c6-a5aa-41b0-b90d-e979feb6f4a4: AllowedOnce
+event: Tool: Pi powershell finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi powershell proposed
+event: PermissionRequest: Pi requests powershell: Write-Output '{"expected_revision":0,"operation":"task.get","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b0578bf3",
+event: Tool: Pi powershell finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: e7c5a76e-95ca-4824-a2c5-e9698e9369fd: Pi requests bash: python3 -c "import uuid; print(str(uuid.uuid4()))" 2>&1 | grep -v "Project Pipeline policy denied"
+event: PermissionRequest: Pi requests bash: python3 -c "import uuid; print(str(uuid.uuid4()))" 2>&1 | grep -v "Project Pipeline policy denied"
+permission resolved: e7c5a76e-95ca-4824-a2c5-e9698e9369fd
+event: Pi permission e7c5a76e-95ca-4824-a2c5-e9698e9369fd: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi powershell proposed
+permission pending: f32e0497-70ec-4bea-83da-5dbf48d6cc06: Pi requests powershell: Write-Output '{"expected_revision":5,"operation":"test.record","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b0578bf
+event: PermissionRequest: Pi requests powershell: Write-Output '{"expected_revision":5,"operation":"test.record","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b0578bf
+permission resolved: f32e0497-70ec-4bea-83da-5dbf48d6cc06
+event: Pi permission f32e0497-70ec-4bea-83da-5dbf48d6cc06: Denied
+event: Tool: Pi powershell finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi powershell proposed
+permission pending: 6f4a63b9-221e-466f-b2ae-2c492f49ed95: Pi requests powershell: Write-Output '{"expected_revision":0,"operation":"task.list","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b0578bf3"
+event: PermissionRequest: Pi requests powershell: Write-Output '{"expected_revision":0,"operation":"task.list","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"8dd96703-b47a-469c-a9dc-6230b0578bf3"
+permission resolved: 6f4a63b9-221e-466f-b2ae-2c492f49ed95
+event: Pi permission 6f4a63b9-221e-466f-b2ae-2c492f49ed95: AllowedOnce
+event: Tool: Pi powershell finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: 78937373-9be0-4cf4-a96c-b3addf70a262: Pi requests bash: python3 -c "import uuid; print(str(uuid.uuid4()))" 2>&1 | grep -v "Project Pipeline policy denied" | head -1
+event: PermissionRequest: Pi requests bash: python3 -c "import uuid; print(str(uuid.uuid4()))" 2>&1 | grep -v "Project Pipeline policy denied" | head -1
+permission resolved: 78937373-9be0-4cf4-a96c-b3addf70a262
+event: Pi permission 78937373-9be0-4cf4-a96c-b3addf70a262: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+Pi protocol or extension error: Pi model-call limit reached before provider request

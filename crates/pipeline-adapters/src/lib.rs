@@ -4,6 +4,8 @@ mod opencode;
 pub use opencode::{OpenCodeAdapter, OpenCodeServer, SseDecoder};
 mod pi_rpc;
 pub use pi_rpc::{PiJsonlDecoder, PiRpcInbox};
+mod pi;
+pub use pi::{PiAdapter, TESTED_PI_VERSION, normalize_pi_event};
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

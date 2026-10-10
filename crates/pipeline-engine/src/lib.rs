@@ -17,8 +17,10 @@ use std::path::Path;
 use std::process::Command;
 use uuid::Uuid;
 mod opencode;
+mod pi;
 mod scheduler;
 pub use opencode::{OpenCodeObservation, OpenCodePermissionOutcome};
+pub use pi::{PiObservation, PiPermissionOutcome};
 pub use scheduler::{
     ActionClass, ActionSpec, PolicyOutcome, RecoveryRecord, RunLimits, RunStart, TaskPacket,
 };
