@@ -1,6 +1,6 @@
 # P14 agent task and evidence review loop
 
-10 October 2026, Windows x86_64. P14 implementation is in verification. The disposable model-driven owner journey is pending a separate scoped prompt approval; the P13 one-prompt approval was consumed.
+10 October 2026, Windows x86_64. P14 implementation is unverified against its required end-to-end journey. The disposable model-driven owner journey is pending a separate scoped prompt approval; the P13 one-prompt approval was consumed.
 
 ## Implemented path
 
