@@ -142,6 +142,9 @@ fn execute(
         )
         .map_err(|e| e.to_string())?;
     let run_id = start.run.id.clone();
+    engine
+        .approve_agent_prompt(&run_id, &input.provider, &input.model)
+        .map_err(|e| e.to_string())?;
     let _ = updates.send(RunUpdate::Started(run_id.clone()));
     let outcome = run_prepared(&mut engine, &input, &start, commands, updates);
     if outcome.is_err()
@@ -167,15 +170,11 @@ fn run_prepared(
     updates: &Sender<RunUpdate>,
 ) -> Result<(), String> {
     let (_bridge, address) = bridge(&input.cli, &input.database)?;
+    let permissions = serde_json::json!({"*":"deny","read":"allow","glob":"allow",
+        "grep":"allow","edit":"allow","bash":"ask"});
     let permission_config = serde_json::json!({
-        "permission": {
-            "*": "deny",
-            "read": "allow",
-            "glob": "allow",
-            "grep": "allow",
-            "edit": "allow",
-            "bash": "ask"
-        },
+        "permission": permissions,
+        "agent": {"build": {"permission": permissions}},
         "autoupdate": false
     })
     .to_string();

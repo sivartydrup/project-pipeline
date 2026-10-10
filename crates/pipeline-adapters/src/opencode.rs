@@ -270,7 +270,7 @@ impl OpenCodeAdapter {
         self.post_json(
             &format!("session/{}/prompt_async", run.session_id),
             &run.checkout,
-            json!({"model":{"providerID":provider_id,"modelID":model_id},
+            json!({"agent":"build","model":{"providerID":provider_id,"modelID":model_id},
                 "parts":[{"type":"text","text":message}]}),
         )?;
         Ok(())
@@ -334,9 +334,13 @@ impl OpenCodeAdapter {
     pub fn assert_runtime_permissions(&self, checkout: &Path) -> Result<()> {
         let config = self.get_json("config", Some(checkout))?;
         let permissions = &config["permission"];
+        let build = &config["agent"]["build"]["permission"];
         if permissions["*"] != "deny"
             || permissions["bash"] != "ask"
             || permissions["edit"] != "allow"
+            || build["*"] != "deny"
+            || build["bash"] != "ask"
+            || build["edit"] != "allow"
         {
             return Err(AdapterError::Protocol(
                 "OpenCode runtime permissions are not restrictive".into(),
@@ -871,8 +875,10 @@ mod tests {
     fn live_owned_server_uses_password_and_stops_on_drop() {
         let executable = std::env::var("OPENCODE_TEST_EXECUTABLE").unwrap();
         let checkout = tempfile::tempdir().unwrap();
-        let config = json!({"permission":{"*":"deny","read":"allow","glob":"allow",
-            "grep":"allow","edit":"allow","bash":"ask"},"autoupdate":false})
+        let permissions = json!({"*":"deny","read":"allow","glob":"allow",
+            "grep":"allow","edit":"allow","bash":"ask"});
+        let config = json!({"permission":permissions,
+            "agent":{"build":{"permission":permissions}},"autoupdate":false})
         .to_string();
         let server = OpenCodeServer::launch_with_environment(
             Path::new(&executable),

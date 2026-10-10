@@ -1973,11 +1973,11 @@ impl DesktopApp {
                 ui.label("Provider"); ui.text_edit_singleline(&mut self.provider_id);
                 ui.label("Model"); ui.text_edit_singleline(&mut self.model_id);
             });
-            ui.label("Starting a run sends the approved task packet to the selected model. Stops at 15 minutes or when observed usage reaches 20,000 tokens.");
+            ui.label("Starting approves one prompt with the selected provider and model, then sends the approved task packet. Provider charges may apply. The run stops at 15 minutes or when observed usage reaches 20,000 tokens.");
             let selected_ready = ready.iter().any(|(id, _)| id == &self.run_task_id);
             if ui.add_enabled(self.run_control.is_none() && selected_ready
                 && !self.provider_id.trim().is_empty() && !self.model_id.trim().is_empty(),
-                egui::Button::new("Start run")).clicked() { self.start_run(); }
+                egui::Button::new("Approve and start run")).clicked() { self.start_run(); }
             if self.run_control.is_some() && ui.button("Stop run").clicked()
                 && let Some(control) = &self.run_control
             {
@@ -2007,6 +2007,15 @@ impl DesktopApp {
                     ));
                     ui.label(format!("Checkout: {}", run.checkout_path));
                     if let Some(packet) = &run.packet {
+                        ui.label(format!(
+                            "Task packet SHA256: {} · {}",
+                            run.packet_sha256.as_deref().unwrap_or("missing"),
+                            if run.packet_verified {
+                                "verified"
+                            } else {
+                                "INVALID"
+                            }
+                        ));
                         ui.collapsing("Approved task packet", |ui| {
                             ui.monospace(packet.to_string());
                         });
@@ -2026,14 +2035,17 @@ impl DesktopApp {
                             ui.label(submission.to_string());
                         });
                     }
-                    ui.collapsing(format!("Events ({})", run.events.len()), |ui| {
-                        for event in &run.events {
-                            ui.label(format!(
-                                "{} · {} · {}",
-                                event.sequence, event.kind, event.summary
-                            ));
-                        }
-                    });
+                    ui.collapsing(
+                        format!("Recent events ({}, max 200)", run.events.len()),
+                        |ui| {
+                            for event in &run.events {
+                                ui.label(format!(
+                                    "{} · {} · {}",
+                                    event.sequence, event.kind, event.summary
+                                ));
+                            }
+                        },
+                    );
                     ui.collapsing(format!("Tests ({})", run.tests.len()), |ui| {
                         for test in &run.tests {
                             ui.label(format!(

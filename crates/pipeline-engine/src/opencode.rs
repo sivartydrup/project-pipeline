@@ -124,6 +124,9 @@ impl ProjectEngine {
             prompt.push_str("\nCall task.get with target_id equal to the packet task_id. For artifact.attach use payload {path: absolute file path, sha256: lowercase SHA-256, kind: test-log}. For test.record use payload {command: executed command, exit_code: integer, environment: {}, log_artifact_id: ID returned by artifact.attach}. Use the task revision from task.get as expected_revision for both, and a fresh idempotency_key per mutation.");
             prompt.push_str("\nBefore task.submit: write a test log inside the checkout and attach it with artifact.attach using its SHA256; record the executed command and exit code with test.record using that log artifact ID. Use absolute checkout paths for artifact.attach and changed_files. The submission payload needs summary, changed_files, test_results (record IDs), residual_risks, and criteria arrays. Submit only after implementation and verification. Never approve your own task.");
         }
+        let (provider, model_id) = model.unwrap_or(("configured", "default"));
+        self.store
+            .consume_agent_prompt_approval(&start.run.id, provider, model_id)?;
         let steering = if let Some((provider, model_id)) = model {
             adapter.steer_with_model(handle, &prompt, provider, model_id)
         } else {

@@ -451,6 +451,17 @@ impl ProjectEngine {
         Ok(self.store.get_run(run_id)?)
     }
 
+    pub fn approve_agent_prompt(
+        &mut self,
+        run_id: &str,
+        provider: &str,
+        model: &str,
+    ) -> Result<String> {
+        Ok(self
+            .store
+            .approve_agent_prompt(run_id, provider, model, "owner")?)
+    }
+
     pub fn review_run_diff(&self, run_id: &str) -> Result<String> {
         let run = self.store.get_run(run_id)?;
         let checkout = Path::new(&run.checkout_path);

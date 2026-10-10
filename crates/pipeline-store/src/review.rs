@@ -37,6 +37,8 @@ pub struct TaskRunReview {
     pub state: String,
     pub checkout_path: String,
     pub packet: Option<Value>,
+    pub packet_sha256: Option<String>,
+    pub packet_verified: bool,
     pub submission: Option<Value>,
     pub artifacts: Vec<ArtifactEvidence>,
     pub tests: Vec<TestEvidence>,
@@ -44,6 +46,118 @@ pub struct TaskRunReview {
 }
 
 impl Store {
+    pub fn approve_agent_prompt(
+        &mut self,
+        run_id: &str,
+        provider: &str,
+        model: &str,
+        actor: &str,
+    ) -> Result<String> {
+        if actor != "owner" {
+            return Err(StoreError::PlanRequiresOwner);
+        }
+        if provider.trim().is_empty() || model.trim().is_empty() {
+            return Err(StoreError::EmptyField("model"));
+        }
+        let tx = self.connection.transaction()?;
+        let (project_id, state, revision, packet_hash): (String, String, i64, String) = tx
+            .query_row(
+                "SELECT r.project_id,r.state,r.revision,p.sha256 FROM agent_runs r
+             JOIN run_packets p ON p.run_id=r.id WHERE r.id=?1",
+                [run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?
+            .ok_or_else(|| StoreError::NotFound(run_id.into()))?;
+        if state != "starting" {
+            return Err(StoreError::RunTransition(
+                "prompt approval requires starting run".into(),
+            ));
+        }
+        let prior: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM approvals WHERE subject_type='agent_run'
+            AND subject_id=?1 AND action_class='external_model_prompt')",
+            [run_id],
+            |row| row.get(0),
+        )?;
+        if prior {
+            return Err(StoreError::PolicyDenied(
+                "run already has a model prompt approval".into(),
+            ));
+        }
+        let target = format!("{provider}/{model}");
+        let subject_hash = format!(
+            "{:x}",
+            Sha256::digest(format!("{packet_hash}:{target}").as_bytes())
+        );
+        let id = Uuid::new_v4().to_string();
+        tx.execute("INSERT INTO approvals(id,project_id,subject_type,subject_id,subject_revision,
+            subject_hash,action_class,target,approver,expires_at)
+            VALUES (?1,?2,'agent_run',?3,?4,?5,'external_model_prompt',?6,'owner',datetime('now','+15 minutes'))",
+            params![id,project_id,run_id,revision,subject_hash,target])?;
+        insert_event(
+            &tx,
+            &project_id,
+            actor,
+            "run.prompt_approve",
+            "run",
+            run_id,
+            revision,
+            None,
+            Some(json!({"provider":provider,"model":model,"approval_id":id})),
+            run_id,
+        )?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    pub fn consume_agent_prompt_approval(
+        &mut self,
+        run_id: &str,
+        provider: &str,
+        model: &str,
+    ) -> Result<()> {
+        let tx = self.connection.transaction()?;
+        let (project_id, packet_hash, revision): (String, String, i64) = tx.query_row(
+            "SELECT r.project_id,p.sha256,r.revision FROM agent_runs r JOIN run_packets p ON p.run_id=r.id
+             WHERE r.id=?1 AND r.state='running'", [run_id],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).optional()?.ok_or_else(|| StoreError::RunTransition("running run packet required".into()))?;
+        let target = format!("{provider}/{model}");
+        let subject_hash = format!(
+            "{:x}",
+            Sha256::digest(format!("{packet_hash}:{target}").as_bytes())
+        );
+        let approval: Option<String> = tx.query_row(
+            "SELECT id FROM approvals WHERE project_id=?1 AND subject_type='agent_run' AND subject_id=?2
+             AND subject_hash=?3 AND action_class='external_model_prompt' AND target=?4
+             AND approver='owner' AND revoked_at IS NULL AND expires_at>CURRENT_TIMESTAMP
+             ORDER BY created_at DESC LIMIT 1",
+            params![project_id,run_id,subject_hash,target], |row| row.get(0),
+        ).optional()?;
+        let id = approval.ok_or_else(|| {
+            StoreError::PolicyDenied("exact model prompt approval missing or consumed".into())
+        })?;
+        tx.execute(
+            "UPDATE approvals SET revoked_at=CURRENT_TIMESTAMP WHERE id=?1 AND revoked_at IS NULL",
+            [&id],
+        )?;
+        insert_event(
+            &tx,
+            &project_id,
+            "scheduler",
+            "run.prompt_consume",
+            "run",
+            run_id,
+            revision,
+            None,
+            Some(json!({"approval_id":id,"provider":provider,"model":model})),
+            run_id,
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn latest_task_feedback(
         &self,
         project_id: &str,
@@ -164,14 +278,18 @@ impl Store {
                  AND actor=?2 AND subject_type='task' ORDER BY id DESC LIMIT 1",
                 params![project_id, format!("agent:{run_id}")], |row| row.get(0),
             ).optional()?;
-            let packet: Option<String> = self
+            let packet: Option<(String, String)> = self
                 .connection
                 .query_row(
-                    "SELECT packet_json FROM run_packets WHERE run_id=?1",
+                    "SELECT packet_json,sha256 FROM run_packets WHERE run_id=?1",
                     [&run_id],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()?;
+            let packet_verified = packet.as_ref().is_some_and(|(value, hash)| {
+                format!("{:x}", Sha256::digest(value.as_bytes())) == *hash
+            });
+            let packet_sha256 = packet.as_ref().map(|(_, hash)| hash.clone());
             let mut artifacts = self.connection.prepare(
                 "SELECT id,kind,uri,sha256 FROM artifacts WHERE run_id=?1 ORDER BY created_at,id",
             )?;
@@ -199,9 +317,9 @@ impl Store {
                 })?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             let mut events = self.connection.prepare(
-                "SELECT sequence,kind,payload_json FROM run_events WHERE run_id=?1 ORDER BY sequence",
+                "SELECT sequence,kind,payload_json FROM run_events WHERE run_id=?1 ORDER BY sequence DESC LIMIT 200",
             )?;
-            let events = events
+            let mut events = events
                 .query_map([&run_id], |row| {
                     let payload: String = row.get(2)?;
                     let summary = serde_json::from_str::<Value>(&payload)
@@ -215,14 +333,17 @@ impl Store {
                     })
                 })?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
+            events.reverse();
             reviews.push(TaskRunReview {
                 run_id,
                 task_id,
                 state,
                 checkout_path,
                 packet: packet
-                    .map(|value| serde_json::from_str(&value))
+                    .map(|(value, _)| serde_json::from_str(&value))
                     .transpose()?,
+                packet_sha256,
+                packet_verified,
                 submission: submission
                     .map(|value| serde_json::from_str(&value))
                     .transpose()?,
@@ -254,6 +375,33 @@ pub(crate) fn require_agent_review_evidence(connection: &Connection, task_id: &s
     if !matches!(run_state.as_str(), "review" | "completed") {
         return Err(StoreError::MissingRunEvidence(
             "run is not submitted for review".into(),
+        ));
+    }
+    let packet: Option<(String, String)> = connection
+        .query_row(
+            "SELECT packet_json,sha256 FROM run_packets WHERE run_id=?1",
+            [&run_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let (packet_json, packet_hash) = packet
+        .ok_or_else(|| StoreError::MissingRunEvidence("approved run packet missing".into()))?;
+    if format!("{:x}", Sha256::digest(packet_json.as_bytes())) != packet_hash {
+        return Err(StoreError::MissingRunEvidence(
+            "run packet hash changed".into(),
+        ));
+    }
+    let packet: Value = serde_json::from_str(&packet_json)?;
+    let (logical_id, scope_revision): (String, i64) = connection.query_row(
+        "SELECT t.logical_id,p.active_scope_revision FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
+        [task_id], |row| Ok((row.get(0)?,row.get(1)?)),
+    )?;
+    if packet["project_id"] != project_id
+        || packet["task_id"] != logical_id
+        || packet["scope_revision"].as_i64() != Some(scope_revision)
+    {
+        return Err(StoreError::MissingRunEvidence(
+            "run packet is outside active scope".into(),
         ));
     }
     let submission: Option<String> = connection
@@ -479,6 +627,29 @@ mod tests {
                 [folder.path().to_str().unwrap()],
             )
             .unwrap();
+        let packet = json!({"project_id":"p","task_id":"T","scope_revision":1}).to_string();
+        store
+            .connection
+            .execute(
+                "INSERT INTO run_packets(run_id,packet_json,sha256) VALUES ('r',?1,?2)",
+                params![packet, format!("{:x}", Sha256::digest(packet.as_bytes()))],
+            )
+            .unwrap();
+        store
+            .connection
+            .execute("UPDATE run_packets SET sha256='bad' WHERE run_id='r'", [])
+            .unwrap();
+        assert!(matches!(
+            store.accept_task("p", "T", 2, "owner", "accept"),
+            Err(StoreError::MissingRunEvidence(_))
+        ));
+        store
+            .connection
+            .execute(
+                "UPDATE run_packets SET sha256=?1 WHERE run_id='r'",
+                [format!("{:x}", Sha256::digest(packet.as_bytes()))],
+            )
+            .unwrap();
         assert!(matches!(
             store.accept_task("p", "T", 2, "owner", "accept"),
             Err(StoreError::MissingRunEvidence(_))
@@ -583,5 +754,72 @@ mod tests {
             store.latest_task_feedback("p", "T").unwrap().as_deref(),
             Some("fix it")
         );
+    }
+
+    #[test]
+    fn model_prompt_approval_is_exact_and_one_use() {
+        let folder = tempdir().unwrap();
+        let mut store = Store::open_in_memory().unwrap();
+        store
+            .create_project(
+                "p",
+                "Project",
+                folder.path().to_str().unwrap(),
+                "owner",
+                "create",
+            )
+            .unwrap();
+        store
+            .connection
+            .execute(
+                "UPDATE projects SET active_scope_revision=1 WHERE id='p'",
+                [],
+            )
+            .unwrap();
+        store
+            .connection
+            .execute(
+                "INSERT INTO tasks(id,project_id,title,outcome,status,scope_revision,logical_id)
+            VALUES ('t','p','Task','Done','ready',1,'T')",
+                [],
+            )
+            .unwrap();
+        store
+            .connection
+            .execute(
+                "INSERT INTO agent_runs(id,project_id,task_id,harness,checkout_path,state)
+            VALUES ('r','p','t','opencode',?1,'starting')",
+                [folder.path().to_str().unwrap()],
+            )
+            .unwrap();
+        store
+            .save_run_packet("r", &json!({"scope_revision":1,"task_id":"T"}))
+            .unwrap();
+        assert!(matches!(
+            store.approve_agent_prompt("r", "openrouter", "model", "agent"),
+            Err(StoreError::PlanRequiresOwner)
+        ));
+        store
+            .approve_agent_prompt("r", "openrouter", "model", "owner")
+            .unwrap();
+        assert!(matches!(
+            store.approve_agent_prompt("r", "openrouter", "model", "owner"),
+            Err(StoreError::PolicyDenied(_))
+        ));
+        store
+            .connection
+            .execute("UPDATE agent_runs SET state='running' WHERE id='r'", [])
+            .unwrap();
+        assert!(matches!(
+            store.consume_agent_prompt_approval("r", "openrouter", "other"),
+            Err(StoreError::PolicyDenied(_))
+        ));
+        store
+            .consume_agent_prompt_approval("r", "openrouter", "model")
+            .unwrap();
+        assert!(matches!(
+            store.consume_agent_prompt_approval("r", "openrouter", "model"),
+            Err(StoreError::PolicyDenied(_))
+        ));
     }
 }

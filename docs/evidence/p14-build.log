@@ -1,2 +1,3 @@
    Compiling pipeline-app v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-app)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.68s
+   Compiling pipeline-cli v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.23s
