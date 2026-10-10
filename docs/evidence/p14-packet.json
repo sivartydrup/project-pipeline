@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "project_id": "p14-sample",
+  "task_id": "fix-add",
+  "task_revision": 1,
+  "scope_revision": 1,
+  "checkout_path": "C:\\Users\\User\\AppData\\Local\\Temp\\project-pipeline-worktrees\\9075a6405aab1950\\ab1ccbb8-12a7-4344-82c8-0933833f1d74\\",
+  "goal": "Correct add to return the sum and pass the included test",
+  "acceptance_criteria": [
+    {
+      "id": "addition-test",
+      "assertion": "The included addition test passes",
+      "verifier": "owner",
+      "required_evidence": [
+        "test-log",
+        "diff"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "approved_decision_ids": [],
+  "allowed_operations": [
+    "project.get",
+    "task.get",
+    "task.submit",
+    "artifact.attach",
+    "test.record"
+  ],
+  "stop_conditions": [
+    "scope_change",
+    "external_publish",
+    "secret_request"
+  ],
+  "limits": {
+    "wall_seconds": 900,
+    "token_budget": 20000,
+    "token_ttl_seconds": 900
+  }
+}

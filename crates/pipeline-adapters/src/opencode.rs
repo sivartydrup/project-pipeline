@@ -24,6 +24,14 @@ pub struct OpenCodeServer {
 
 impl OpenCodeServer {
     pub fn launch(executable: &Path, checkout: &Path) -> Result<Self> {
+        Self::launch_with_environment(executable, checkout, &[])
+    }
+
+    pub fn launch_with_environment(
+        executable: &Path,
+        checkout: &Path,
+        environment: &[(&str, &str)],
+    ) -> Result<Self> {
         #[cfg(windows)]
         if executable.extension().and_then(|value| value.to_str()) != Some("exe") {
             return Err(AdapterError::Protocol(
@@ -49,6 +57,17 @@ impl OpenCodeServer {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+        for (name, value) in environment {
+            if !matches!(
+                *name,
+                "PIPELINE_AGENT_TOKEN" | "PIPELINE_AGENT_BRIDGE" | "OPENCODE_CONFIG_CONTENT"
+            ) {
+                return Err(AdapterError::Protocol(
+                    "unsupported server environment key".into(),
+                ));
+            }
+            command.env(name, value);
+        }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -285,6 +304,45 @@ impl OpenCodeAdapter {
             )
         }));
         Ok(events)
+    }
+
+    pub fn observed_token_usage(&self, run: &RunHandle) -> Result<u64> {
+        let messages = self.get_json(
+            &format!("session/{}/message", run.session_id),
+            Some(&run.checkout),
+        )?;
+        let messages = messages
+            .as_array()
+            .ok_or_else(|| AdapterError::Protocol("message list is not an array".into()))?;
+        let mut total = 0_u64;
+        for message in messages {
+            let info = &message["info"];
+            if info["role"] != "assistant" {
+                continue;
+            }
+            let tokens = &info["tokens"];
+            for field in ["input", "output", "reasoning"] {
+                total = total.saturating_add(tokens[field].as_u64().unwrap_or(0));
+            }
+            for field in ["read", "write"] {
+                total = total.saturating_add(tokens["cache"][field].as_u64().unwrap_or(0));
+            }
+        }
+        Ok(total)
+    }
+
+    pub fn assert_runtime_permissions(&self, checkout: &Path) -> Result<()> {
+        let config = self.get_json("config", Some(checkout))?;
+        let permissions = &config["permission"];
+        if permissions["*"] != "deny"
+            || permissions["bash"] != "ask"
+            || permissions["edit"] != "allow"
+        {
+            return Err(AdapterError::Protocol(
+                "OpenCode runtime permissions are not restrictive".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub fn delete_session(&self, run: &RunHandle) -> Result<()> {
@@ -693,6 +751,14 @@ mod tests {
                     "/session/ses_fixture" => (200, json!({"id":"ses_fixture"})),
                     "/session/status" => (200, json!({"ses_fixture":{"type":"busy"}})),
                     "/session/ses_fixture/diff" => (200, json!([{"file":"a.rs"}])),
+                    "/session/ses_fixture/message" => (
+                        200,
+                        json!([
+                            {"info":{"role":"user"}},
+                            {"info":{"role":"assistant","tokens":{"input":30,"output":20,
+                                "reasoning":5,"cache":{"read":3,"write":2}}}}
+                        ]),
+                    ),
                     "/permission" => (
                         200,
                         json!([{"id":"per_fixture","sessionID":"ses_fixture",
@@ -731,6 +797,7 @@ mod tests {
         let recovery = adapter.recover(&handle).unwrap();
         assert_eq!(recovery.state, RecoveryState::Busy);
         assert_eq!(recovery.diff_files, 1);
+        assert_eq!(adapter.observed_token_usage(&handle).unwrap(), 60);
         let permissions = adapter.pending_permissions(&handle).unwrap();
         assert_eq!(permissions.len(), 1);
         assert_eq!(permissions[0].kind, EventKind::PermissionRequest);
@@ -804,9 +871,18 @@ mod tests {
     fn live_owned_server_uses_password_and_stops_on_drop() {
         let executable = std::env::var("OPENCODE_TEST_EXECUTABLE").unwrap();
         let checkout = tempfile::tempdir().unwrap();
-        let server = OpenCodeServer::launch(Path::new(&executable), checkout.path()).unwrap();
+        let config = json!({"permission":{"*":"deny","read":"allow","glob":"allow",
+            "grep":"allow","edit":"allow","bash":"ask"},"autoupdate":false})
+        .to_string();
+        let server = OpenCodeServer::launch_with_environment(
+            Path::new(&executable),
+            checkout.path(),
+            &[("OPENCODE_CONFIG_CONTENT", &config)],
+        )
+        .unwrap();
         let adapter = server.adapter().unwrap();
         assert_eq!(adapter.probe().health, Health::Ready);
+        adapter.assert_runtime_permissions(checkout.path()).unwrap();
         let unauthenticated =
             OpenCodeAdapter::connect(&server.endpoint, None, TESTED_VERSION).unwrap();
         assert_eq!(unauthenticated.probe().health, Health::Unavailable);

@@ -441,6 +441,7 @@ impl Store {
             return Err(StoreError::TaskDependencyBlocked(logical_id.to_owned()));
         }
         if to == "accepted" {
+            super::review::require_agent_review_evidence(&transaction, &id)?;
             let criteria = criteria_for(&transaction, &id)?;
             if criteria.is_empty()
                 || criteria.iter().any(|criterion| {

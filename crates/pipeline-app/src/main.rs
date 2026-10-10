@@ -2,14 +2,16 @@ use eframe::egui;
 use pipeline_engine::{
     BriefContent, CriterionSpec, DecisionInput, DependencyKind, DependencySpec, DiscoveryView,
     EpicSpec, InboxItem, MilestoneSpec, PlanContent, PlanView, ProjectEngine, ProjectOverview,
-    ResearchInput, ReviewView, TaskSpec,
+    ResearchInput, ReviewView, TaskRunReview, TaskSpec,
 };
 use pipeline_terminal::TerminalSession;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
+mod run_worker;
+use run_worker::{RunCommand, RunControl, RunLaunch, RunUpdate};
 
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
@@ -61,6 +63,7 @@ enum PlanAction {
     Submit(String, i64),
     Verify(String, String, i64, BTreeMap<String, String>),
     Accept(String, i64),
+    RequestChanges(String, i64, String),
 }
 
 enum DecisionAction {
@@ -88,6 +91,18 @@ struct DesktopApp {
     plan_draft: PlanContent,
     plan_message: Option<String>,
     review: Option<ReviewView>,
+    run_reviews: Vec<TaskRunReview>,
+    run_message: Option<String>,
+    run_diff: Option<(String, String)>,
+    change_reasons: BTreeMap<String, String>,
+    run_control: Option<RunControl>,
+    run_task_id: String,
+    opencode_path: String,
+    cli_path: String,
+    provider_id: String,
+    model_id: String,
+    pending_permission: Option<(String, String)>,
+    last_run_refresh: Instant,
     decision_draft: DecisionInput,
     editing_decision: Option<String>,
     decision_message: Option<String>,
@@ -143,6 +158,31 @@ impl Default for DesktopApp {
             plan_draft: PlanContent::default(),
             plan_message: None,
             review: None,
+            run_reviews: Vec::new(),
+            run_message: None,
+            run_diff: None,
+            change_reasons: BTreeMap::new(),
+            run_control: None,
+            run_task_id: String::new(),
+            opencode_path: std::env::var("PIPELINE_OPENCODE_EXE").unwrap_or_default(),
+            cli_path: std::env::var("PIPELINE_CLI_EXE").unwrap_or_else(|_| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|path| {
+                        path.parent().map(|p| {
+                            p.join(if cfg!(windows) {
+                                "pipeline-cli.exe"
+                            } else {
+                                "pipeline-cli"
+                            })
+                        })
+                    })
+                    .map_or_else(String::new, |path| path.to_string_lossy().into_owned())
+            }),
+            provider_id: String::new(),
+            model_id: String::new(),
+            pending_permission: None,
+            last_run_refresh: Instant::now(),
             decision_draft: DecisionInput {
                 impact: "medium".into(),
                 ..Default::default()
@@ -366,6 +406,8 @@ impl DesktopApp {
 
     fn select_project(&mut self, id: String) {
         self.selected_project = Some(id.clone());
+        self.run_diff = None;
+        self.run_message = None;
         self.active_terminal = self
             .terminals
             .iter()
@@ -375,6 +417,7 @@ impl DesktopApp {
         self.refresh_discovery();
         self.refresh_plan();
         self.refresh_review();
+        self.refresh_runs();
     }
 
     fn refresh_discovery(&mut self) {
@@ -433,6 +476,82 @@ impl DesktopApp {
             }
             Err(error) => self.decision_message = Some(error.to_string()),
         }
+    }
+
+    fn refresh_runs(&mut self) {
+        self.run_reviews.clear();
+        if let (Some(engine), Some(project_id)) = (&self.engine, &self.selected_project) {
+            match engine.list_task_run_reviews(project_id) {
+                Ok(reviews) => {
+                    self.run_reviews = reviews;
+                }
+                Err(error) => self.run_message = Some(error.to_string()),
+            }
+        }
+    }
+
+    fn poll_run(&mut self, ctx: &egui::Context) {
+        let mut finished = false;
+        let mut permission_changed = false;
+        if let Some(control) = &self.run_control {
+            while let Ok(update) = control.updates.try_recv() {
+                match update {
+                    RunUpdate::Started(id) => self.run_message = Some(format!("Run {id} started")),
+                    RunUpdate::Event(message) => self.run_message = Some(message),
+                    RunUpdate::Permission(id, summary) => {
+                        self.pending_permission = Some((id, summary));
+                        permission_changed = true;
+                    }
+                    RunUpdate::Finished(message) => {
+                        self.run_message = Some(message);
+                        finished = true;
+                    }
+                    RunUpdate::Failed(error) => {
+                        self.run_message = Some(format!("Run failed: {error}"));
+                        finished = true;
+                    }
+                }
+            }
+        }
+        if permission_changed {
+            self.refresh_review();
+        }
+        if self.run_control.is_some() && self.last_run_refresh.elapsed() >= Duration::from_secs(2) {
+            self.refresh_runs();
+            if self.active_tab == Tab::Runs {
+                self.refresh_plan();
+            }
+            self.last_run_refresh = Instant::now();
+        }
+        if finished {
+            self.run_control = None;
+            self.pending_permission = None;
+            self.refresh_runs();
+            self.refresh_plan();
+            self.refresh_review();
+        }
+        if self.run_control.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(200));
+        }
+    }
+
+    fn start_run(&mut self) {
+        let (Some(project_id), Some(data_dir)) = (&self.selected_project, &self.data_dir) else {
+            self.run_message = Some("Select a project first".into());
+            return;
+        };
+        let launch = RunLaunch {
+            database: data_dir.join("portfolio.sqlite"),
+            evidence_dir: data_dir.join("evidence"),
+            project_id: project_id.clone(),
+            task_id: self.run_task_id.clone(),
+            opencode: PathBuf::from(&self.opencode_path),
+            cli: PathBuf::from(&self.cli_path),
+            provider: self.provider_id.clone(),
+            model: self.model_id.clone(),
+        };
+        self.run_control = Some(run_worker::launch(launch));
+        self.run_message = Some("Preparing approved task and isolated checkout…".into());
     }
 
     fn refresh_global_inbox(&mut self) {
@@ -555,6 +674,15 @@ impl DesktopApp {
             PlanAction::Accept(id, revision) => engine
                 .accept_task(project_id, &id, revision)
                 .map(|view| (view, "Task accepted".to_owned(), false)),
+            PlanAction::RequestChanges(id, revision, reason) => engine
+                .request_task_changes(project_id, &id, revision, &reason)
+                .map(|view| {
+                    (
+                        view,
+                        "Changes requested; task is ready to rerun".to_owned(),
+                        false,
+                    )
+                }),
         };
         match result {
             Ok((view, message, reset_draft)) => {
@@ -572,6 +700,7 @@ impl DesktopApp {
                 if let Ok(items) = engine.global_inbox() {
                     self.global_inbox = items;
                 }
+                self.refresh_runs();
             }
             Err(error) => self.plan_message = Some(error.to_string()),
         }
@@ -1527,6 +1656,17 @@ impl DesktopApp {
                             action =
                                 Some(PlanAction::Accept(task.logical_id.clone(), task.revision));
                         }
+                        if task.status == "review" {
+                            ui.horizontal(|ui| {
+                                ui.label("Changes needed");
+                                let reason = self.change_reasons.entry(task.logical_id.clone()).or_default();
+                                ui.text_edit_singleline(reason);
+                                if ui.add_enabled(!reason.trim().is_empty(), egui::Button::new("Request changes")).clicked() {
+                                    action = Some(PlanAction::RequestChanges(
+                                        task.logical_id.clone(), task.revision, reason.clone()));
+                                }
+                            });
+                        }
                     });
                 }
             }
@@ -1796,6 +1936,151 @@ impl DesktopApp {
         });
     }
 
+    fn runs_workspace(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.heading("Agent runs");
+            if ui.button("Refresh").clicked() {
+                self.refresh_runs();
+                self.refresh_plan();
+                self.refresh_review();
+            }
+        });
+        if let Some(message) = &self.run_message {
+            ui.label(message);
+        }
+        if self.selected_project.is_none() {
+            ui.label("Select a project to review runs.");
+            return;
+        }
+        ui.group(|ui| {
+            ui.strong("Start approved task");
+            let ready: Vec<_> = self.plan.as_ref().map_or_else(Vec::new, |plan| plan.active_tasks.iter()
+                .filter(|task| task.status == "ready" && task.unresolved_blockers.is_empty())
+                .map(|task| (task.logical_id.clone(), task.title.clone())).collect());
+            egui::ComboBox::from_id_salt("run-task")
+                .selected_text(ready.iter().find(|(id, _)| id == &self.run_task_id)
+                    .map_or("Select ready task", |(_, title)| title.as_str()))
+                .show_ui(ui, |ui| {
+                    for (id, title) in &ready {
+                        ui.selectable_value(&mut self.run_task_id, id.clone(), title);
+                    }
+                });
+            ui.label("OpenCode executable");
+            ui.text_edit_singleline(&mut self.opencode_path);
+            ui.label("Project Pipeline CLI executable");
+            ui.text_edit_singleline(&mut self.cli_path);
+            ui.horizontal(|ui| {
+                ui.label("Provider"); ui.text_edit_singleline(&mut self.provider_id);
+                ui.label("Model"); ui.text_edit_singleline(&mut self.model_id);
+            });
+            ui.label("Starting a run sends the approved task packet to the selected model. Stops at 15 minutes or when observed usage reaches 20,000 tokens.");
+            let selected_ready = ready.iter().any(|(id, _)| id == &self.run_task_id);
+            if ui.add_enabled(self.run_control.is_none() && selected_ready
+                && !self.provider_id.trim().is_empty() && !self.model_id.trim().is_empty(),
+                egui::Button::new("Start run")).clicked() { self.start_run(); }
+            if self.run_control.is_some() && ui.button("Stop run").clicked()
+                && let Some(control) = &self.run_control
+            {
+                let _ = control.commands.send(RunCommand::Stop);
+            }
+            if let Some((id, summary)) = &self.pending_permission {
+                ui.label(format!("Permission pending: {summary}"));
+                if ui.button("Continue after owner decision").clicked() {
+                    if let Some(control) = &self.run_control {
+                        let _ = control.commands.send(RunCommand::ContinuePermission(id.clone()));
+                    }
+                    self.pending_permission = None;
+                }
+            }
+        });
+        if self.run_reviews.is_empty() {
+            ui.label("No agent runs for this project.");
+            return;
+        }
+        let mut requested_diff = None;
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for run in &self.run_reviews {
+                ui.group(|ui| {
+                    ui.strong(format!(
+                        "Task {} · run {} · {}",
+                        run.task_id, run.run_id, run.state
+                    ));
+                    ui.label(format!("Checkout: {}", run.checkout_path));
+                    if let Some(packet) = &run.packet {
+                        ui.collapsing("Approved task packet", |ui| {
+                            ui.monospace(packet.to_string());
+                        });
+                    }
+                    if ui.button("Review current diff").clicked() {
+                        requested_diff = Some(run.run_id.clone());
+                    }
+                    if let Some((id, diff)) = &self.run_diff
+                        && id == &run.run_id
+                    {
+                        ui.collapsing("Diff preview", |ui| {
+                            ui.monospace(diff);
+                        });
+                    }
+                    if let Some(submission) = &run.submission {
+                        ui.collapsing("Agent submission", |ui| {
+                            ui.label(submission.to_string());
+                        });
+                    }
+                    ui.collapsing(format!("Events ({})", run.events.len()), |ui| {
+                        for event in &run.events {
+                            ui.label(format!(
+                                "{} · {} · {}",
+                                event.sequence, event.kind, event.summary
+                            ));
+                        }
+                    });
+                    ui.collapsing(format!("Tests ({})", run.tests.len()), |ui| {
+                        for test in &run.tests {
+                            ui.label(format!(
+                                "{} · {} · exit {:?} · log {}",
+                                test.id,
+                                test.command,
+                                test.exit_code,
+                                test.log_artifact_id.as_deref().unwrap_or("missing")
+                            ));
+                        }
+                    });
+                    ui.collapsing(format!("Artifacts ({})", run.artifacts.len()), |ui| {
+                        for artifact in &run.artifacts {
+                            ui.label(format!(
+                                "{} · {} · {} · SHA256 {}",
+                                artifact.id, artifact.kind, artifact.uri, artifact.sha256
+                            ));
+                        }
+                    });
+                    let decisions = self.review.as_ref().map_or(0, |review| {
+                        review
+                            .decisions
+                            .iter()
+                            .filter(|decision| {
+                                decision.task_logical_id.as_deref() == Some(run.task_id.as_str())
+                            })
+                            .count()
+                    });
+                    if decisions > 0 && ui.button(format!("Decisions ({decisions})")).clicked() {
+                        self.active_tab = Tab::Decisions;
+                    }
+                    if run.submission.is_some() && ui.button("Review task criteria").clicked() {
+                        self.active_tab = Tab::Plan;
+                    }
+                });
+            }
+        });
+        if let Some(id) = requested_diff
+            && let Some(engine) = &self.engine
+        {
+            match engine.review_run_diff(&id) {
+                Ok(diff) => self.run_diff = Some((id, diff)),
+                Err(error) => self.run_message = Some(error.to_string()),
+            }
+        }
+    }
+
     fn management(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             for (tab, name) in [
@@ -1859,8 +2144,7 @@ impl DesktopApp {
             }
             Tab::Activity => self.activity_workspace(ui),
             Tab::Runs => {
-                ui.heading("Agent runs");
-                ui.label("Harness integration is not connected yet.");
+                self.runs_workspace(ui);
             }
             Tab::About => {
                 ui.heading("Project Pipeline");
@@ -2086,6 +2370,7 @@ fn plan_changes(before: &PlanContent, after: &PlanContent) -> Vec<String> {
 impl eframe::App for DesktopApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.poll_run(&ctx);
         ctx.set_visuals(if self.dark_mode {
             egui::Visuals::dark()
         } else {

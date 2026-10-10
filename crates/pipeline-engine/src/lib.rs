@@ -10,7 +10,7 @@ pub use pipeline_store::StoreError;
 pub use pipeline_store::{
     ActivityRecord, AgentCommand, AgentGrant, AgentReply, BriefRecord, CheckoutRecord,
     DecisionInput, DecisionRecord, InboxItem, PlanRecord, PolicyRequestRecord, ResearchInput,
-    ResearchRecord, RunCheckpoint, RunRecord, TaskRecord,
+    ResearchRecord, RunCheckpoint, RunRecord, TaskRecord, TaskRunReview,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -423,6 +423,138 @@ impl ProjectEngine {
             &Uuid::new_v4().to_string(),
         )?;
         self.load_plan(project_id)
+    }
+
+    pub fn request_task_changes(
+        &mut self,
+        project_id: &str,
+        logical_id: &str,
+        expected_revision: i64,
+        reason: &str,
+    ) -> Result<PlanView> {
+        self.store.request_task_changes(
+            project_id,
+            logical_id,
+            expected_revision,
+            reason,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?;
+        self.load_plan(project_id)
+    }
+
+    pub fn list_task_run_reviews(&self, project_id: &str) -> Result<Vec<TaskRunReview>> {
+        Ok(self.store.list_task_run_reviews(project_id)?)
+    }
+
+    pub fn get_agent_run(&self, run_id: &str) -> Result<RunRecord> {
+        Ok(self.store.get_run(run_id)?)
+    }
+
+    pub fn review_run_diff(&self, run_id: &str) -> Result<String> {
+        let run = self.store.get_run(run_id)?;
+        let checkout = Path::new(&run.checkout_path);
+        let output = Command::new("git")
+            .args([
+                "-c",
+                "core.hooksPath=NUL",
+                "-c",
+                "filter.lfs.process=",
+                "-c",
+                "filter.lfs.smudge=",
+                "-C",
+            ])
+            .arg(checkout)
+            .args([
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--stat",
+                "HEAD",
+                "--",
+            ])
+            .output()?;
+        if !output.status.success() {
+            return Err(EngineError::Git(
+                String::from_utf8_lossy(&output.stderr)
+                    .chars()
+                    .take(500)
+                    .collect(),
+            ));
+        }
+        let patch = Command::new("git")
+            .args([
+                "-c",
+                "core.hooksPath=NUL",
+                "-c",
+                "filter.lfs.process=",
+                "-c",
+                "filter.lfs.smudge=",
+                "-C",
+            ])
+            .arg(checkout)
+            .args(["diff", "--no-ext-diff", "--no-textconv", "HEAD", "--"])
+            .output()?;
+        if !patch.status.success() {
+            return Err(EngineError::Git(
+                String::from_utf8_lossy(&patch.stderr)
+                    .chars()
+                    .take(500)
+                    .collect(),
+            ));
+        }
+        let mut result = String::from_utf8_lossy(&output.stdout).into_owned();
+        result.push_str(&String::from_utf8_lossy(&patch.stdout));
+        if result.len() > 200_000 {
+            let boundary = result.floor_char_boundary(200_000);
+            result.truncate(boundary);
+            result.push_str("\n[diff preview truncated]");
+        }
+        Ok(result)
+    }
+
+    pub fn capture_run_diff(&mut self, run_id: &str, evidence_dir: &Path) -> Result<String> {
+        let run = self.store.get_run(run_id)?;
+        let output = Command::new("git")
+            .args([
+                "-c",
+                "core.hooksPath=NUL",
+                "-c",
+                "filter.lfs.process=",
+                "-c",
+                "filter.lfs.smudge=",
+                "-C",
+            ])
+            .arg(&run.checkout_path)
+            .args([
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--binary",
+                "HEAD",
+                "--",
+            ])
+            .output()?;
+        if !output.status.success() {
+            return Err(EngineError::Git(
+                String::from_utf8_lossy(&output.stderr)
+                    .chars()
+                    .take(500)
+                    .collect(),
+            ));
+        }
+        if output.stdout.is_empty() {
+            return Err(EngineError::RunPreflight("run has no tracked diff".into()));
+        }
+        if output.stdout.len() > 20_000_000 {
+            return Err(EngineError::RunPreflight(
+                "diff exceeds 20 MB evidence limit".into(),
+            ));
+        }
+        std::fs::create_dir_all(evidence_dir)?;
+        let path = evidence_dir.join(format!("{run_id}.patch"));
+        std::fs::write(&path, &output.stdout)?;
+        Ok(self.store.attach_run_diff(run_id, &path)?)
     }
 
     pub fn export_active_plan_json(&self, project_id: &str) -> Result<String> {

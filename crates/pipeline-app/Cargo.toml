@@ -8,6 +8,7 @@ rust-version.workspace = true
 eframe.workspace = true
 pipeline-domain = { path = "../pipeline-domain" }
 pipeline-engine = { path = "../pipeline-engine" }
+pipeline-adapters = { path = "../pipeline-adapters" }
 pipeline-terminal = { path = "../pipeline-terminal" }
 directories = "6"
 serde = { version = "1", features = ["derive"] }

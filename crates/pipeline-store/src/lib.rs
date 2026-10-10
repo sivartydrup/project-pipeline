@@ -10,15 +10,17 @@ use std::time::Duration;
 mod agent;
 mod discovery;
 pub use agent::{AgentCommand, AgentGrant, AgentReply};
+mod review;
 mod runs;
 pub use discovery::{BriefRecord, BriefStatus, ResearchInput, ResearchRecord};
+pub use review::{ArtifactEvidence, RunEventEvidence, TaskRunReview, TestEvidence};
 pub use runs::{CheckoutRecord, PolicyRequestRecord, RunCheckpoint, RunRecord};
 mod decisions;
 pub use decisions::{ActivityRecord, DecisionInput, DecisionRecord, InboxItem};
 mod plan;
 pub use plan::{CriterionRecord, PlanRecord, PlanStatus, TaskRecord};
 
-const CURRENT_SCHEMA_VERSION: i64 = 8;
+const CURRENT_SCHEMA_VERSION: i64 = 9;
 const INITIAL_SCHEMA: &str = include_str!("../migrations/001_initial.sql");
 const PROJECT_GIT_SCHEMA: &str = include_str!("../migrations/002_project_git.sql");
 const DISCOVERY_SCHEMA: &str = include_str!("../migrations/003_discovery.sql");
@@ -27,6 +29,7 @@ const DECISIONS_SCHEMA: &str = include_str!("../migrations/005_decisions.sql");
 const AGENT_BRIDGE_SCHEMA: &str = include_str!("../migrations/006_agent_bridge.sql");
 const SCHEDULER_POLICY_SCHEMA: &str = include_str!("../migrations/007_scheduler_policy.sql");
 const OPENCODE_ADAPTER_SCHEMA: &str = include_str!("../migrations/008_opencode_adapter.sql");
+const RUN_REVIEW_SCHEMA: &str = include_str!("../migrations/009_run_review.sql");
 const EXPORT_TABLES: &[&str] = &[
     "projects",
     "brief_revisions",
@@ -51,6 +54,7 @@ const EXPORT_TABLES: &[&str] = &[
     "run_limits",
     "policy_requests",
     "adapter_event_receipts",
+    "run_packets",
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -109,6 +113,8 @@ pub enum StoreError {
     CriteriaNotVerified(String),
     #[error("missing evidence reference for required kind: {0}")]
     MissingEvidence(String),
+    #[error("agent-produced task is missing linked run evidence: {0}")]
+    MissingRunEvidence(String),
     #[error("database schema {found} is newer than supported schema {supported}")]
     NewerSchema { found: i64, supported: i64 },
     #[error("backup destination already exists")]
@@ -501,6 +507,9 @@ fn migrate(connection: &mut Connection) -> Result<()> {
     }
     if version < 8 {
         apply_migration(connection, 8, OPENCODE_ADAPTER_SCHEMA)?;
+    }
+    if version < 9 {
+        apply_migration(connection, 9, RUN_REVIEW_SCHEMA)?;
     }
     Ok(())
 }

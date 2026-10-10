@@ -1,0 +1,24 @@
+   Compiling addition-app v0.1.0 (C:\Users\User\AppData\Local\Temp\project-pipeline-p14-sample-20261010\addition-app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.92s
+     Running unittests src\lib.rs (target\debug\deps\addition_app-a0dd2e4c4a3e3030.exe)
+
+running 1 test
+test tests::adds_two_values ... FAILED
+
+failures:
+
+---- tests::adds_two_values stdout ----
+
+thread 'tests::adds_two_values' (10812) panicked at src\lib.rs:9:9:
+assertion `left == right` failed
+  left: -1
+ right: 5
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tests::adds_two_values
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

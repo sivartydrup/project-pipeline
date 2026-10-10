@@ -2444,6 +2444,7 @@ version = "0.1.0"
 dependencies = [
  "directories",
  "eframe",
+ "pipeline-adapters",
  "pipeline-domain",
  "pipeline-engine",
  "pipeline-terminal",

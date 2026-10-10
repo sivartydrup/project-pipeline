@@ -31,6 +31,8 @@ pub struct TaskPacket {
     pub scope_revision: i64,
     pub checkout_path: String,
     pub goal: String,
+    #[serde(default)]
+    pub review_feedback: Option<String>,
     pub acceptance_criteria: Vec<PacketCriterion>,
     pub dependencies: Vec<String>,
     pub approved_decision_ids: Vec<String>,
@@ -320,6 +322,9 @@ impl ProjectEngine {
             scope_revision: task.scope_revision,
             checkout_path: checkout_path.to_string_lossy().into_owned(),
             goal: task.outcome.clone(),
+            review_feedback: self
+                .store
+                .latest_task_feedback(project_id, logical_task_id)?,
             acceptance_criteria: task
                 .criteria
                 .iter()
@@ -365,6 +370,11 @@ impl ProjectEngine {
             ],
             limits,
         };
+        self.store.save_run_packet(
+            &run.id,
+            &serde_json::to_value(&packet)
+                .map_err(|error| EngineError::RunPreflight(error.to_string()))?,
+        )?;
         Ok(RunStart {
             run,
             checkout,
