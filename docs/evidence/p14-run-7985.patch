@@ -1,0 +1,11 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index b8e607f..3dc4ab1 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,5 +1,5 @@
+ pub fn add(left: i32, right: i32) -> i32 {
+-    left - right
++    left + right
+ }
+ 
+ #[cfg(test)]

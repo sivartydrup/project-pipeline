@@ -74,22 +74,30 @@ impl OpenCodeServer {
             command.creation_flags(0x0800_0000);
         }
         let child = command.spawn()?;
-        let server = Self {
+        let mut server = Self {
             child,
             endpoint: format!("http://127.0.0.1:{port}/"),
             password,
         };
         let adapter = server.adapter()?;
-        let until = Instant::now() + Duration::from_secs(15);
+        let until = Instant::now() + Duration::from_secs(30);
+        let mut last_detail = String::new();
         while Instant::now() < until {
-            if adapter.probe().health == Health::Ready {
+            let report = adapter.probe();
+            if report.health == Health::Ready {
                 return Ok(server);
+            }
+            last_detail = report.detail;
+            if let Some(status) = server.child.try_wait()? {
+                return Err(AdapterError::Unavailable(format!(
+                    "OpenCode server exited with {status}: {last_detail}"
+                )));
             }
             std::thread::sleep(Duration::from_millis(150));
         }
-        Err(AdapterError::Unavailable(
-            "OpenCode did not become ready within 15 seconds".into(),
-        ))
+        Err(AdapterError::Unavailable(format!(
+            "OpenCode did not become ready within 30 seconds: {last_detail}"
+        )))
     }
 
     pub fn adapter(&self) -> Result<OpenCodeAdapter> {

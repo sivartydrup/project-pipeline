@@ -219,11 +219,19 @@ impl ProjectEngine {
         run: &RunHandle,
         permission_id: &str,
     ) -> Result<OpenCodePermissionOutcome> {
-        let event = adapter
+        let mut event = adapter
             .pending_permissions(run)?
             .into_iter()
             .find(|event| event.permission_id.as_deref() == Some(permission_id))
             .ok_or_else(|| EngineError::RunPreflight("permission no longer pending".into()))?;
+        for _ in 0..3 {
+            let prior = event.permission_target.clone();
+            adapter.enrich_bash_permission_target(run, &mut event)?;
+            if event.permission_target != prior {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
         match self.evaluate_action(&run.run_id, &permission_action(&event)?)? {
             PolicyOutcome::Pending(request) => Ok(OpenCodePermissionOutcome::Pending(request.id)),
             PolicyOutcome::Denied(_) => {

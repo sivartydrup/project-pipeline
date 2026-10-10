@@ -510,6 +510,11 @@ impl DesktopApp {
                         }
                         permission_changed = true;
                     }
+                    RunUpdate::PermissionResolved(id) => {
+                        self.pending_permissions
+                            .retain(|(pending_id, _)| pending_id != &id);
+                        permission_changed = true;
+                    }
                     RunUpdate::Finished(message) => {
                         self.run_message = Some(message);
                         finished = true;
@@ -2469,7 +2474,47 @@ impl eframe::App for DesktopApp {
     }
 }
 
+fn headless_run(args: &[String]) -> Result<(), String> {
+    if args.len() != 9 {
+        return Err("usage: pipeline-app --headless-run <database> <evidence_dir> <project_id> <task_id> <opencode_exe> <pipeline_cli_exe> <provider> <model> <token_budget>".into());
+    }
+    let launch = RunLaunch {
+        database: PathBuf::from(&args[0]),
+        evidence_dir: PathBuf::from(&args[1]),
+        project_id: args[2].clone(),
+        task_id: args[3].clone(),
+        opencode: PathBuf::from(&args[4]),
+        cli: PathBuf::from(&args[5]),
+        provider: args[6].clone(),
+        model: args[7].clone(),
+        token_budget: args[8].parse().map_err(|_| "invalid token budget")?,
+    };
+    let control = run_worker::launch(launch);
+    while let Ok(update) = control.updates.recv() {
+        match update {
+            RunUpdate::Started(id) => println!("run started: {id}"),
+            RunUpdate::Event(message) => println!("event: {message}"),
+            RunUpdate::Permission(id, summary) => println!("permission pending: {id}: {summary}"),
+            RunUpdate::PermissionResolved(id) => println!("permission resolved: {id}"),
+            RunUpdate::Finished(message) => {
+                println!("finished: {message}");
+                return Ok(());
+            }
+            RunUpdate::Failed(error) => return Err(error),
+        }
+    }
+    Err("run worker ended without a result".into())
+}
+
 fn main() -> eframe::Result {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).is_some_and(|arg| arg == "--headless-run") {
+        if let Err(error) = headless_run(&args[2..]) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1100.0, 650.0]),
         ..Default::default()

@@ -1,5 +1,6 @@
 use pipeline_adapters::{AgentAdapter, EventKind, NormalizedEvent, OpenCodeServer};
 use pipeline_engine::{OpenCodePermissionOutcome, ProjectEngine, RunLimits};
+use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -16,6 +17,7 @@ pub enum RunUpdate {
     Started(String),
     Event(String),
     Permission(String, String),
+    PermissionResolved(String),
     Finished(String),
     Failed(String),
 }
@@ -239,6 +241,8 @@ fn run_prepared(
         .map_err(|e| e.to_string())?;
     let deadline = Instant::now() + Duration::from_secs(900);
     let mut last_usage_check = Instant::now();
+    let mut known_permissions: HashMap<String, String> = HashMap::new();
+    let mut last_permission_check = Instant::now();
     loop {
         while let Ok(command) = commands.try_recv() {
             match command {
@@ -259,6 +263,9 @@ fn run_prepared(
                             id.clone(),
                             "Owner decision still pending".into(),
                         ));
+                    } else {
+                        known_permissions.remove(&id);
+                        let _ = updates.send(RunUpdate::PermissionResolved(id.clone()));
                     }
                     let _ = updates.send(RunUpdate::Event(format!("Permission {id}: {outcome:?}")));
                 }
@@ -284,6 +291,11 @@ fn run_prepared(
                     Some(OpenCodePermissionOutcome::Pending(_))
                 ) && let Some(id) = observation.event.permission_id.as_ref()
                 {
+                    if let Some(OpenCodePermissionOutcome::Pending(request_id)) =
+                        &observation.permission
+                    {
+                        known_permissions.insert(id.clone(), request_id.clone());
+                    }
                     let _ = updates.send(RunUpdate::Permission(
                         id.clone(),
                         observation.event.summary.clone(),
@@ -299,6 +311,39 @@ fn run_prepared(
                 return Err("OpenCode event stream ended".into());
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        if last_permission_check.elapsed() >= Duration::from_millis(500) {
+            last_permission_check = Instant::now();
+            for (id, request_id) in known_permissions.clone() {
+                let request = engine
+                    .get_action_request(&request_id)
+                    .map_err(|e| e.to_string())?;
+                if request.status == "pending" {
+                    continue;
+                }
+                match engine.resolve_pending_opencode_permission(&adapter, &handle, &id) {
+                    Ok(OpenCodePermissionOutcome::Pending(new_request_id)) => {
+                        known_permissions.insert(id.clone(), new_request_id);
+                        let _ = updates.send(RunUpdate::Permission(
+                            id.clone(),
+                            "Additional exact action review required".into(),
+                        ));
+                    }
+                    Ok(outcome) => {
+                        known_permissions.remove(&id);
+                        let _ = updates.send(RunUpdate::PermissionResolved(id.clone()));
+                        let _ =
+                            updates.send(RunUpdate::Event(format!("Permission {id}: {outcome:?}")));
+                    }
+                    Err(error) => {
+                        known_permissions.remove(&id);
+                        let _ = updates.send(RunUpdate::PermissionResolved(id.clone()));
+                        let _ = updates.send(RunUpdate::Event(format!(
+                            "Permission {id} needs review: {error}"
+                        )));
+                    }
+                }
+            }
         }
         let plan = engine
             .load_plan(&input.project_id)

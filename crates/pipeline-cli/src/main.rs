@@ -2,6 +2,9 @@ use std::env;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use pipeline_engine::ProjectEngine;
 
 fn main() {
     if let Err(error) = run() {
@@ -31,7 +34,41 @@ fn run() -> Result<(), String> {
             println!("{content}");
             Ok(())
         }
-        _ => Err("usage: pipeline-cli serve <database> <127.0.0.1:port> | call <127.0.0.1:port> (JSON on stdin; token in PIPELINE_AGENT_TOKEN)".into()),
+        Some("policy-list") if args.len() == 4 => {
+            let engine = ProjectEngine::open(&args[2]).map_err(|e| e.to_string())?;
+            for request in engine.load_review(&args[3]).map_err(|e| e.to_string())?.policy_requests {
+                println!("id={} revision={} class={} digest={} target={:?} effect={:?}",
+                    request.id, request.revision, request.action_class,
+                    request.command_digest, request.target, request.effect_summary);
+            }
+            Ok(())
+        }
+        Some("policy-resolve") if args.len() == 8 => {
+            let mut engine = ProjectEngine::open(&args[2]).map_err(|e| e.to_string())?;
+            let request = engine.load_review(&args[3]).map_err(|e| e.to_string())?
+                .policy_requests.into_iter().find(|request| request.id == args[4])
+                .ok_or("pending policy request not found in project")?;
+            let revision = args[5].parse::<i64>().map_err(|_| "invalid revision")?;
+            if request.revision != revision || request.command_digest != args[6] {
+                return Err("policy request revision or command digest changed".into());
+            }
+            let approve = match args[7].as_str() {
+                "approve" => true,
+                "deny" => false,
+                _ => return Err("policy decision must be approve or deny".into()),
+            };
+            let expiry = if approve {
+                Some(SystemTime::now().duration_since(UNIX_EPOCH)
+                    .map_err(|e| e.to_string())?.as_secs() as i64 + 600)
+            } else { None };
+            let resolved = engine.resolve_action_request(&request.id, revision, approve, expiry)
+                .map_err(|e| e.to_string())?;
+            println!("id={} status={} revision={} digest={} target={:?}",
+                resolved.id, resolved.status, resolved.revision,
+                resolved.command_digest, resolved.target);
+            Ok(())
+        }
+        _ => Err("usage: pipeline-cli serve <database> <127.0.0.1:port> | call <127.0.0.1:port> (JSON on stdin; token in PIPELINE_AGENT_TOKEN) | policy-list <database> <project_id> | policy-resolve <database> <project_id> <request_id> <revision> <command_digest> <approve|deny>".into()),
     }
 }
 

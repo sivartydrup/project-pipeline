@@ -521,6 +521,10 @@ impl ProjectEngine {
             "owner",
         )?)
     }
+
+    pub fn get_action_request(&self, id: &str) -> Result<PolicyRequestRecord> {
+        Ok(self.store.get_policy_request(id)?)
+    }
 }
 
 #[cfg(test)]

@@ -2458,6 +2458,7 @@ name = "pipeline-cli"
 version = "0.1.0"
 dependencies = [
  "pipeline-api",
+ "pipeline-engine",
  "serde_json",
 ]
 
