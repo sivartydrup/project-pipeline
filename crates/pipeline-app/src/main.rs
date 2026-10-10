@@ -1656,12 +1656,13 @@ impl DesktopApp {
                             action =
                                 Some(PlanAction::Accept(task.logical_id.clone(), task.revision));
                         }
-                        if task.status == "review" {
+                        if task.status == "review" || task.status == "blocked" {
                             ui.horizontal(|ui| {
-                                ui.label("Changes needed");
+                                ui.label(if task.status == "blocked" { "Retry reason" } else { "Changes needed" });
                                 let reason = self.change_reasons.entry(task.logical_id.clone()).or_default();
                                 ui.text_edit_singleline(reason);
-                                if ui.add_enabled(!reason.trim().is_empty(), egui::Button::new("Request changes")).clicked() {
+                                let label = if task.status == "blocked" { "Retry task" } else { "Request changes" };
+                                if ui.add_enabled(!reason.trim().is_empty(), egui::Button::new(label)).clicked() {
                                     action = Some(PlanAction::RequestChanges(
                                         task.logical_id.clone(), task.revision, reason.clone()));
                                 }
@@ -2000,86 +2001,90 @@ impl DesktopApp {
         let mut requested_diff = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             for run in &self.run_reviews {
-                ui.group(|ui| {
-                    ui.strong(format!(
-                        "Task {} · run {} · {}",
-                        run.task_id, run.run_id, run.state
-                    ));
-                    ui.label(format!("Checkout: {}", run.checkout_path));
-                    if let Some(packet) = &run.packet {
-                        ui.label(format!(
-                            "Task packet SHA256: {} · {}",
-                            run.packet_sha256.as_deref().unwrap_or("missing"),
-                            if run.packet_verified {
-                                "verified"
-                            } else {
-                                "INVALID"
-                            }
+                ui.push_id(&run.run_id, |ui| {
+                    ui.group(|ui| {
+                        ui.strong(format!(
+                            "Task {} · run {} · {}",
+                            run.task_id, run.run_id, run.state
                         ));
-                        ui.collapsing("Approved task packet", |ui| {
-                            ui.monospace(packet.to_string());
-                        });
-                    }
-                    if ui.button("Review current diff").clicked() {
-                        requested_diff = Some(run.run_id.clone());
-                    }
-                    if let Some((id, diff)) = &self.run_diff
-                        && id == &run.run_id
-                    {
-                        ui.collapsing("Diff preview", |ui| {
-                            ui.monospace(diff);
-                        });
-                    }
-                    if let Some(submission) = &run.submission {
-                        ui.collapsing("Agent submission", |ui| {
-                            ui.label(submission.to_string());
-                        });
-                    }
-                    ui.collapsing(
-                        format!("Recent events ({}, max 200)", run.events.len()),
-                        |ui| {
-                            for event in &run.events {
+                        ui.label(format!("Checkout: {}", run.checkout_path));
+                        if let Some(packet) = &run.packet {
+                            ui.label(format!(
+                                "Task packet SHA256: {} · {}",
+                                run.packet_sha256.as_deref().unwrap_or("missing"),
+                                if run.packet_verified {
+                                    "verified"
+                                } else {
+                                    "INVALID"
+                                }
+                            ));
+                            ui.collapsing("Approved task packet", |ui| {
+                                ui.monospace(packet.to_string());
+                            });
+                        }
+                        if ui.button("Review current diff").clicked() {
+                            requested_diff = Some(run.run_id.clone());
+                        }
+                        if let Some((id, diff)) = &self.run_diff
+                            && id == &run.run_id
+                        {
+                            ui.collapsing("Diff preview", |ui| {
+                                ui.monospace(diff);
+                            });
+                        }
+                        if let Some(submission) = &run.submission {
+                            ui.collapsing("Agent submission", |ui| {
+                                ui.label(submission.to_string());
+                            });
+                        }
+                        ui.collapsing(
+                            format!("Recent events ({}, max 200)", run.events.len()),
+                            |ui| {
+                                for event in &run.events {
+                                    ui.label(format!(
+                                        "{} · {} · {}",
+                                        event.sequence, event.kind, event.summary
+                                    ));
+                                }
+                            },
+                        );
+                        ui.collapsing(format!("Tests ({})", run.tests.len()), |ui| {
+                            for test in &run.tests {
                                 ui.label(format!(
-                                    "{} · {} · {}",
-                                    event.sequence, event.kind, event.summary
+                                    "{} · {} · exit {:?} · log {}",
+                                    test.id,
+                                    test.command,
+                                    test.exit_code,
+                                    test.log_artifact_id.as_deref().unwrap_or("missing")
                                 ));
                             }
-                        },
-                    );
-                    ui.collapsing(format!("Tests ({})", run.tests.len()), |ui| {
-                        for test in &run.tests {
-                            ui.label(format!(
-                                "{} · {} · exit {:?} · log {}",
-                                test.id,
-                                test.command,
-                                test.exit_code,
-                                test.log_artifact_id.as_deref().unwrap_or("missing")
-                            ));
+                        });
+                        ui.collapsing(format!("Artifacts ({})", run.artifacts.len()), |ui| {
+                            for artifact in &run.artifacts {
+                                ui.label(format!(
+                                    "{} · {} · {} · SHA256 {}",
+                                    artifact.id, artifact.kind, artifact.uri, artifact.sha256
+                                ));
+                            }
+                        });
+                        let decisions = self.review.as_ref().map_or(0, |review| {
+                            review
+                                .decisions
+                                .iter()
+                                .filter(|decision| {
+                                    decision.task_logical_id.as_deref()
+                                        == Some(run.task_id.as_str())
+                                })
+                                .count()
+                        });
+                        if decisions > 0 && ui.button(format!("Decisions ({decisions})")).clicked()
+                        {
+                            self.active_tab = Tab::Decisions;
                         }
-                    });
-                    ui.collapsing(format!("Artifacts ({})", run.artifacts.len()), |ui| {
-                        for artifact in &run.artifacts {
-                            ui.label(format!(
-                                "{} · {} · {} · SHA256 {}",
-                                artifact.id, artifact.kind, artifact.uri, artifact.sha256
-                            ));
+                        if run.submission.is_some() && ui.button("Review task criteria").clicked() {
+                            self.active_tab = Tab::Plan;
                         }
-                    });
-                    let decisions = self.review.as_ref().map_or(0, |review| {
-                        review
-                            .decisions
-                            .iter()
-                            .filter(|decision| {
-                                decision.task_logical_id.as_deref() == Some(run.task_id.as_str())
-                            })
-                            .count()
-                    });
-                    if decisions > 0 && ui.button(format!("Decisions ({decisions})")).clicked() {
-                        self.active_tab = Tab::Decisions;
-                    }
-                    if run.submission.is_some() && ui.button("Review task criteria").clicked() {
-                        self.active_tab = Tab::Plan;
-                    }
+                    })
                 });
             }
         });

@@ -552,11 +552,25 @@ impl Store {
                 actual: revision,
             });
         }
-        if status != "review" {
+        if status != "review" && status != "blocked" {
             return Err(StoreError::InvalidTaskTransition {
                 from: status,
                 to: "ready",
             });
+        }
+        if status == "blocked" {
+            let latest_run: Option<String> = tx
+                .query_row(
+                    "SELECT state FROM agent_runs WHERE task_id=?1 ORDER BY rowid DESC LIMIT 1",
+                    [&task_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if !matches!(latest_run.as_deref(), Some("cancelled" | "failed")) {
+                return Err(StoreError::RunTransition(
+                    "blocked task needs a cancelled or failed latest run before retry".into(),
+                ));
+            }
         }
         let active: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM agent_runs WHERE task_id=?1 AND state IN ('queued','starting','running','waiting_for_input','review'))",
@@ -577,7 +591,7 @@ impl Store {
             "task",
             &task_id,
             revision + 1,
-            Some(json!({"status":"review"})),
+            Some(json!({"status":status})),
             Some(json!({"status":"ready","reason":reason.trim()})),
             correlation_id,
         )?;
@@ -753,6 +767,56 @@ mod tests {
         assert_eq!(
             store.latest_task_feedback("p", "T").unwrap().as_deref(),
             Some("fix it")
+        );
+    }
+
+    #[test]
+    fn blocked_task_retry_requires_finished_latest_run() {
+        let folder = tempdir().unwrap();
+        let mut store = Store::open_in_memory().unwrap();
+        store
+            .create_project(
+                "p",
+                "Project",
+                folder.path().to_str().unwrap(),
+                "owner",
+                "create",
+            )
+            .unwrap();
+        store
+            .connection
+            .execute(
+                "UPDATE projects SET active_scope_revision=1 WHERE id='p'",
+                [],
+            )
+            .unwrap();
+        store.connection.execute("INSERT INTO tasks(id,project_id,title,outcome,status,scope_revision,logical_id,revision)
+            VALUES ('t','p','Task','Done','blocked',1,'T',2)", []).unwrap();
+        assert!(matches!(
+            store.request_task_changes("p", "T", 2, "retry", "owner", "retry"),
+            Err(StoreError::RunTransition(_))
+        ));
+        store
+            .connection
+            .execute(
+                "INSERT INTO agent_runs(id,project_id,task_id,harness,checkout_path,state)
+            VALUES ('r','p','t','opencode',?1,'cancelled')",
+                [folder.path().to_str().unwrap()],
+            )
+            .unwrap();
+        store
+            .request_task_changes("p", "T", 2, "retry after denied command", "owner", "retry")
+            .unwrap();
+        let status: String = store
+            .connection
+            .query_row("SELECT status FROM tasks WHERE id='t'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "ready");
+        assert_eq!(
+            store.latest_task_feedback("p", "T").unwrap().as_deref(),
+            Some("retry after denied command")
         );
     }
 

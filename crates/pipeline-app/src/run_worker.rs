@@ -254,7 +254,17 @@ fn run_prepared(
             }
         }
         match event_rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(Ok(event)) => {
+            Ok(Ok(mut event)) => {
+                if event.kind == EventKind::PermissionRequest {
+                    for _ in 0..3 {
+                        let prior = event.permission_target.clone();
+                        let _ = adapter.enrich_bash_permission_target(&handle, &mut event);
+                        if event.permission_target != prior {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                }
                 let observation = engine
                     .observe_opencode_event(&adapter, &handle, event)
                     .map_err(|e| e.to_string())?;

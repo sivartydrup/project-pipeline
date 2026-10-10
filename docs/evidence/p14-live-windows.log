@@ -1,0 +1,22 @@
+P14 Windows desktop journey — 2026-10-10 Australia/Sydney
+
+Scope approval: docs/approval-p14-live-smoke-2026-10-10.md
+Project: p14-sample (disposable addition-app)
+Task: fix-add
+Model route: openrouter / cohere/north-mini-code:free
+Run: 484df2a7-82dc-42ff-af49-364612939313
+Session: ses_edc60d405ffeptvLqhXmf7Bff0
+
+Observed in the Project Pipeline desktop app:
+1. Runs tab listed Fix addition behavior as ready. Provider and model were entered, then Approve and start run was clicked once.
+2. The app prepared an isolated checkout and displayed task packet SHA256 4477c3429f12e907a7d4b03a9358672d3294bce79d2e0e7f1ec347942585d2 (verified).
+3. OpenCode sent one prompt on the approved route. Its session reported one assistant turn and 5,611 observed tokens. No subsequent prompt was sent.
+4. The first tool call requested Bash permission for a local task.get bridge read. The UI's recorded target included only the first part of the shell pipeline, ending after target_id. The complete tool call in the local OpenCode session was an echo of task.get JSON piped to pipeline-cli call on loopback. Because the owner approval target was incomplete, the request was denied in the Decisions tab.
+5. Continue after owner decision returned the denial to OpenCode. The assistant turn ended with the tool call rejected. There was no tracked diff, test, artifact, or task submission. The run was stopped in the Runs tab; its checkout was retained and run state became cancelled.
+6. The Runs tab showed duplicate egui widget ID warnings over the evidence pane when two runs for the same task were listed. This impaired visual review.
+
+Result: live journey unverified. The one-prompt approval was consumed. Code changes after this observation isolate each run's widget IDs and attempt to enrich Bash permission targets with the complete pending tool command. A further live prompt requires new scoped owner approval.
+
+Post-fix verification: cargo fmt --all, cargo test --workspace, cargo clippy --workspace --all-targets -- -D warnings, and cargo build --workspace passed. The rebuilt desktop loaded both cancelled run cards after Refresh and showed no duplicate-widget overlay. The full-command enrichment has a passing unit test; it has not yet been exercised with another model prompt.
+
+Retry recovery verification: the cancelled run left fix-add blocked. A new owner Retry task control accepted a reason, moved the task to ready, cleared the owner inbox item, and kept both prior run cards. The store test requires the latest run to be cancelled or failed before this transition. Post-retry checks passed; logs are p14-test-postfix.log, p14-clippy-postfix.log, and p14-build-postfix.log.

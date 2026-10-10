@@ -306,6 +306,35 @@ impl OpenCodeAdapter {
         Ok(events)
     }
 
+    /// OpenCode's permission resource can be only the first command in a shell
+    /// pipeline. Resolve the full pending Bash tool input before presenting an
+    /// exact owner approval target. An ambiguous match stays unenriched.
+    pub fn enrich_bash_permission_target(
+        &self,
+        run: &RunHandle,
+        event: &mut NormalizedEvent,
+    ) -> Result<()> {
+        if event.kind != EventKind::PermissionRequest
+            || event.summary != "OpenCode requests bash permission"
+        {
+            return Ok(());
+        }
+        let Some(target) = event.permission_target.as_deref() else {
+            return Ok(());
+        };
+        let Some((permission_id, resource)) = target.split_once(": ") else {
+            return Ok(());
+        };
+        let messages = self.get_json(
+            &format!("session/{}/message", run.session_id),
+            Some(&run.checkout),
+        )?;
+        if let Some(command) = full_pending_bash_command(&messages, resource) {
+            event.permission_target = Some(format!("{permission_id}: {command}"));
+        }
+        Ok(())
+    }
+
     pub fn observed_token_usage(&self, run: &RunHandle) -> Result<u64> {
         let messages = self.get_json(
             &format!("session/{}/message", run.session_id),
@@ -359,6 +388,34 @@ impl OpenCodeAdapter {
         .map_err(map_http)?;
         Ok(())
     }
+}
+
+fn full_pending_bash_command(messages: &Value, resource: &str) -> Option<String> {
+    let mut commands = messages
+        .as_array()?
+        .iter()
+        .flat_map(|message| {
+            message["parts"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|part| {
+                    (part["type"] == "tool"
+                        && part["tool"] == "bash"
+                        && matches!(
+                            part["state"]["status"].as_str(),
+                            Some("pending" | "running")
+                        ))
+                    .then(|| part["state"]["input"]["command"].as_str())
+                    .flatten()
+                })
+        })
+        .filter(|command| command.starts_with(resource));
+    let found = commands.next()?.to_owned();
+    if commands.any(|other| other != found) {
+        return None;
+    }
+    Some(found)
 }
 
 impl AgentAdapter for OpenCodeAdapter {
@@ -670,6 +727,21 @@ mod tests {
     use super::*;
     use std::io::Read;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn owner_permission_target_uses_entire_pending_bash_pipeline() {
+        let messages = json!([{"parts":[{"type":"tool","tool":"bash",
+            "state":{"status":"running","input":{"command":"echo data | pipeline-cli call localhost"}}}]}]);
+        assert_eq!(
+            full_pending_bash_command(&messages, "echo data"),
+            Some("echo data | pipeline-cli call localhost".into())
+        );
+        let ambiguous = json!([{"parts":[
+            {"type":"tool","tool":"bash","state":{"status":"running","input":{"command":"echo data | one"}}},
+            {"type":"tool","tool":"bash","state":{"status":"running","input":{"command":"echo data | two"}}}
+        ]}]);
+        assert_eq!(full_pending_bash_command(&ambiguous, "echo data"), None);
+    }
 
     #[test]
     fn sse_frames_and_permission_versions_normalize_without_approval() {
