@@ -1,6 +1,6 @@
 # Implementation progress
 
-Updated 9 October 2026. Task acceptance follows `plan/backlog.json`; an implementation note or passing compile does not by itself accept a task.
+Updated 10 October 2026. Task acceptance follows `plan/backlog.json`; an implementation note or passing compile does not by itself accept a task.
 
 | Task | State | Evidence / remaining work |
 | --- | --- | --- |
@@ -17,7 +17,7 @@ Updated 9 October 2026. Task acceptance follows `plan/backlog.json`; an implemen
 | P10 | Accepted for foundation | Owner acceptance in `docs/approval-p10-2026-10-09.md`; decision service, revision-bound owner actions, prioritized inbox, activity UI, milestone/task/portfolio links, v4→v5 migration, Windows tests/build, and isolated UI journeys. Evidence: `docs/decisions-build.md`. |
 | P11 | Accepted for foundation | Owner acceptance in `docs/approval-p11-2026-10-09.md`; scoped CLI and loopback API, transactional token/replay/revision/audit checks, complete command surface, v5→v6 migration, contract and security tests passed. Evidence: `docs/agent-bridge.md` and linked logs. |
 | P12 | Accepted for foundation | Owner acceptance in `docs/approval-p12-2026-10-09.md`; scheduler preflight, managed Git worktrees, run state machine, exact scoped policy requests, owner inbox actions, and startup recovery. Windows state, recovery, denial, migration, and workspace checks passed. Evidence: `docs/scheduler-build.md` and linked logs. |
-| P13 | In review | OpenCode 1.18.30 adapter, normalized event and permission mapping, explicit degraded states, session recovery, v7→v8 event receipts, protocol fixtures, and live Windows session and model-driven permission smoke passed. Evidence: `docs/opencode-adapter-build.md` and linked logs. Owner acceptance remains. |
-| P14–P19 | Not started | Dependencies and gates in `plan/backlog.json`. P14 remains blocked until P13 is accepted; P07 verification remains separate. |
+| P13 | Accepted for foundation | Owner acceptance in `docs/approval-p13-2026-10-10.md`; OpenCode 1.18.30 adapter, normalized event and permission mapping, explicit degraded states, session recovery, v7→v8 event receipts, protocol fixtures, and live Windows session and model-driven permission smoke passed. Evidence: `docs/opencode-adapter-build.md` and linked logs. |
+| P14–P19 | Not started | Dependencies and gates in `plan/backlog.json`. P14 is now unblocked; P07 verification remains separate. |
 
 The MacBook Pro M1 Max is not yet available. Native macOS checks remain release requirements and do not block Windows foundation work.
