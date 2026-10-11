@@ -11,7 +11,7 @@ Status: **in progress** on 11 October 2026. This checklist records evidence and 
 | Large-output performance | Passed local focused check | [50,000-line parser log](evidence/p19-large-output.log); full desktop responsiveness remains a manual check. |
 | Secret redaction and input controls | Passed local tests; advisory review pending | [Redaction log](evidence/p19-export-redaction.log) and [focused security review](evidence/p19-security-review.md) cover credential-shaped inputs, file tampering, exact approvals, and expiry. Dependency advisory tooling is unavailable locally. |
 | Accessibility | Partial | [Review](evidence/p19-accessibility-review.md): a read-only terminal transcript fallback is present; high-DPI and assistive-technology checks are pending. |
-| Windows, Apple Silicon macOS, Linux CI | Pending final run | The project has a three-OS workflow; attach current commit/run link after successful execution. |
+| Windows, Apple Silicon macOS, Linux CI | Passed | [Run 38106963959](evidence/p19-ci.md) passed formatting, Clippy, tests, build, and artifact upload on all three; macOS ARM64 architecture was asserted. |
 | Native M1 Max install and full journey | Unavailable | Owner's M1 Max is not yet available; must be completed before release acceptance. |
 | Signing and notarization | Not configured | No signing/notarization identities have been provided. The Windows archive is unsigned and intended for local evaluation only; macOS notarization is unverified. Public distribution remains gated. |
 | Scoped owner release approval | Not granted | Required before any deployment or publication. |
