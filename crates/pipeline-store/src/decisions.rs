@@ -419,6 +419,35 @@ impl Store {
                 revision: task.revision,
             });
         }
+        let lifecycle_blockers = self.lifecycle_blockers(project_id)?;
+        if lifecycle_blockers.release > 0 {
+            inbox.push(InboxItem {project_id:project_id.into(),kind:"release".into(),
+                subject_id:project_id.into(),title:"Release check or deployment blocked".into(),
+                detail:"Inspect the latest release candidate and its failed required check, deployment, or smoke result".into(),
+                priority:0,revision:0});
+        }
+        for entry in self
+            .list_lifecycle(project_id)?
+            .into_iter()
+            .filter(|entry| {
+                matches!(
+                    entry.input.status.as_str(),
+                    "open" | "in_progress" | "blocked"
+                ) && (entry.input.status == "blocked"
+                    || (matches!(entry.input.kind.as_str(), "bug" | "incident")
+                        && matches!(entry.input.severity.as_str(), "high" | "critical")))
+            })
+        {
+            inbox.push(InboxItem {
+                project_id: project_id.into(),
+                kind: "operations".into(),
+                subject_id: entry.id,
+                title: format!("{}: {}", entry.input.kind, entry.input.title),
+                detail: format!("{} · {}", entry.input.severity, entry.input.status),
+                priority: 0,
+                revision: entry.revision,
+            });
+        }
         inbox.sort_by(|a, b| {
             a.priority
                 .cmp(&b.priority)

@@ -1,0 +1,10 @@
+   Compiling pipeline-store v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-store)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.77s
+     Running unittests src\lib.rs (target\debug\deps\pipeline_store-f83fe9514463a860.exe)
+
+running 3 tests
+test design::tests::design_file_and_links_are_project_scoped ... ok
+test design::tests::all_design_workflow_kinds_are_recordable ... ok
+test design::tests::design_to_implementation_journey_preserves_reviewed_versions_and_links ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.06s

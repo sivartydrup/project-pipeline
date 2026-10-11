@@ -1,0 +1,9 @@
+   Compiling pipeline-store v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-store)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.09s
+     Running unittests src\lib.rs (target\debug\deps\pipeline_store-f83fe9514463a860.exe)
+
+running 2 tests
+test release::tests::failed_then_passing_check_controls_release_approval ... ok
+test release::tests::deployment_requires_separate_exact_target_one_use_approval ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.09s

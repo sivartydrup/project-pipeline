@@ -8,11 +8,17 @@ use std::path::Path;
 use std::time::Duration;
 
 mod agent;
+mod design;
 mod discovery;
+mod operations;
 pub use agent::{AgentCommand, AgentGrant, AgentReply};
+pub use design::{DesignArtifactInput, DesignArtifactRecord};
+mod release;
 mod review;
 mod runs;
 pub use discovery::{BriefRecord, BriefStatus, ResearchInput, ResearchRecord};
+pub use operations::{LifecycleBlockers, LifecycleInput, LifecycleRecord};
+pub use release::{DeploymentRecord, ReleaseBuild, ReleaseCheck, ReleaseRecord};
 pub use review::{ArtifactEvidence, RunEventEvidence, TaskRunReview, TestEvidence};
 pub use runs::{CheckoutRecord, PolicyRequestRecord, RunCheckpoint, RunRecord};
 mod decisions;
@@ -20,7 +26,7 @@ pub use decisions::{ActivityRecord, DecisionInput, DecisionRecord, InboxItem};
 mod plan;
 pub use plan::{CriterionRecord, PlanRecord, PlanStatus, TaskRecord};
 
-const CURRENT_SCHEMA_VERSION: i64 = 9;
+const CURRENT_SCHEMA_VERSION: i64 = 12;
 const INITIAL_SCHEMA: &str = include_str!("../migrations/001_initial.sql");
 const PROJECT_GIT_SCHEMA: &str = include_str!("../migrations/002_project_git.sql");
 const DISCOVERY_SCHEMA: &str = include_str!("../migrations/003_discovery.sql");
@@ -30,6 +36,9 @@ const AGENT_BRIDGE_SCHEMA: &str = include_str!("../migrations/006_agent_bridge.s
 const SCHEDULER_POLICY_SCHEMA: &str = include_str!("../migrations/007_scheduler_policy.sql");
 const OPENCODE_ADAPTER_SCHEMA: &str = include_str!("../migrations/008_opencode_adapter.sql");
 const RUN_REVIEW_SCHEMA: &str = include_str!("../migrations/009_run_review.sql");
+const DESIGN_SCHEMA: &str = include_str!("../migrations/010_design.sql");
+const RELEASE_SCHEMA: &str = include_str!("../migrations/011_release.sql");
+const OPERATIONS_SCHEMA: &str = include_str!("../migrations/012_operations.sql");
 const EXPORT_TABLES: &[&str] = &[
     "projects",
     "brief_revisions",
@@ -55,6 +64,11 @@ const EXPORT_TABLES: &[&str] = &[
     "policy_requests",
     "adapter_event_receipts",
     "run_packets",
+    "design_artifacts",
+    "release_builds",
+    "release_checks",
+    "release_deployments",
+    "lifecycle_entries",
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -145,6 +159,12 @@ pub enum StoreError {
     RunTransition(String),
     #[error("policy action denied: {0}")]
     PolicyDenied(String),
+    #[error("invalid release: {0}")]
+    InvalidRelease(String),
+    #[error("invalid lifecycle record: {0}")]
+    InvalidLifecycle(String),
+    #[error("invalid design artifact: {0}")]
+    InvalidDesign(String),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -288,9 +308,12 @@ impl Store {
         } else {
             (accepted_weight * 10_000 / total_weight) as u16
         };
+        let lifecycle_blockers = self.lifecycle_blockers(project_id)?;
         Ok(ProjectMetrics {
             verified_completion_basis_points: completion,
-            blocked_count: blocked_count as u32,
+            blocked_count: blocked_count as u32
+                + lifecycle_blockers.release
+                + lifecycle_blockers.operations,
         })
     }
 
@@ -380,8 +403,7 @@ impl Store {
         Ok(())
     }
 
-    /// Exports every workflow table. This schema has no credential fields;
-    /// redaction of accidental secrets in free text is a later API gate.
+    /// Exports workflow tables while redacting credential-shaped content.
     pub fn export_json(&self) -> Result<String> {
         let mut tables = Map::new();
         for table in EXPORT_TABLES {
@@ -399,7 +421,7 @@ impl Store {
                         ValueRef::Integer(value) => json!(value),
                         ValueRef::Real(value) => json!(value),
                         ValueRef::Text(value) => {
-                            Value::String(String::from_utf8_lossy(value).into_owned())
+                            redact_export_text(name, &String::from_utf8_lossy(value))
                         }
                         ValueRef::Blob(value) => json!(value),
                     };
@@ -424,6 +446,82 @@ fn validate_nonempty(field: &'static str, value: &str) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+fn redact_export_text(column: &str, text: &str) -> Value {
+    if export_sensitive_key(column) {
+        return json!("[REDACTED]");
+    }
+    let trimmed = text.trim_start();
+    if (trimmed.starts_with('{') || trimmed.starts_with('['))
+        && let Ok(value) = serde_json::from_str::<Value>(text)
+    {
+        return Value::String(redact_export_json(value).to_string());
+    }
+    if export_sensitive_text(text) {
+        json!("[REDACTED]")
+    } else {
+        json!(text)
+    }
+}
+
+fn redact_export_json(value: Value) -> Value {
+    match value {
+        Value::Object(fields) => Value::Object(
+            fields
+                .into_iter()
+                .map(|(key, value)| {
+                    let value = if export_sensitive_key(&key) {
+                        json!("[REDACTED]")
+                    } else {
+                        redact_export_json(value)
+                    };
+                    (key, value)
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.into_iter().map(redact_export_json).collect()),
+        Value::String(text) if export_sensitive_text(&text) => json!("[REDACTED]"),
+        other => other,
+    }
+}
+
+fn export_sensitive_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    [
+        "password",
+        "credential",
+        "api_key",
+        "api-key",
+        "private_key",
+        "secret",
+        "authorization",
+        "access_token",
+        "refresh_token",
+        "auth_token",
+    ]
+    .iter()
+    .any(|part| key.contains(part))
+}
+
+fn export_sensitive_text(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    [
+        "bearer ",
+        "sk-",
+        "password:",
+        "password=",
+        "api_key:",
+        "api_key=",
+        "api-key:",
+        "api-key=",
+        "secret:",
+        "secret=",
+        "token:",
+        "token=",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
 }
 
 fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRecord> {
@@ -510,6 +608,15 @@ fn migrate(connection: &mut Connection) -> Result<()> {
     }
     if version < 9 {
         apply_migration(connection, 9, RUN_REVIEW_SCHEMA)?;
+    }
+    if version < 10 {
+        apply_migration(connection, 10, DESIGN_SCHEMA)?;
+    }
+    if version < 11 {
+        apply_migration(connection, 11, RELEASE_SCHEMA)?;
+    }
+    if version < 12 {
+        apply_migration(connection, 12, OPERATIONS_SCHEMA)?;
     }
     Ok(())
 }
@@ -604,6 +711,23 @@ mod tests {
             export["tables"]["activity_events"][0]["operation"],
             "project.create"
         );
+    }
+
+    #[test]
+    fn export_redacts_secrets_in_free_text_and_embedded_json() {
+        let mut store = Store::open_in_memory().unwrap();
+        store
+            .create_project("p", "Sample", "C:/sample", "owner", "create")
+            .unwrap();
+        store.connection.execute(
+            "INSERT INTO research_findings(id,project_id,claim,confidence,is_hypothesis,summary)
+             VALUES ('r','p','Bearer private-marker','low',1,?1)",
+            [r#"{"api_key":"private-marker","note":"safe detail","nested":{"password":"private-marker"}}"#],
+        ).unwrap();
+        let export = store.export_json().unwrap();
+        assert!(!export.contains("private-marker"));
+        assert!(export.contains("[REDACTED]"));
+        assert!(export.contains("safe detail"));
     }
 
     #[test]
@@ -749,6 +873,63 @@ mod tests {
             vec!["A", "B"]
         );
         assert!(path.with_extension("pre-v4.sqlite").exists());
+    }
+
+    #[test]
+    fn upgrades_v11_preserves_data_and_restores_preupgrade_backup() {
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("pipeline.sqlite");
+        let mut connection = Connection::open(&database).unwrap();
+        for (version, schema) in [
+            (1, INITIAL_SCHEMA),
+            (2, PROJECT_GIT_SCHEMA),
+            (3, DISCOVERY_SCHEMA),
+            (4, PLAN_SCHEMA),
+            (5, DECISIONS_SCHEMA),
+            (6, AGENT_BRIDGE_SCHEMA),
+            (7, SCHEDULER_POLICY_SCHEMA),
+            (8, OPENCODE_ADAPTER_SCHEMA),
+            (9, RUN_REVIEW_SCHEMA),
+            (10, DESIGN_SCHEMA),
+            (11, RELEASE_SCHEMA),
+        ] {
+            apply_migration(&mut connection, version, schema).unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO projects(id,name,path) VALUES ('p','Before upgrade','C:/sample')",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+        let upgraded = Store::open(&database).unwrap();
+        assert_eq!(upgraded.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
+        assert_eq!(
+            upgraded.get_project("p").unwrap().unwrap().name,
+            "Before upgrade"
+        );
+        let backup = database.with_extension("pre-v11.sqlite");
+        let backup_connection = Connection::open(&backup).unwrap();
+        assert_eq!(
+            backup_connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            11
+        );
+        drop(backup_connection);
+        let mut restored = Store::open_in_memory().unwrap();
+        restored.restore_from(&backup).unwrap();
+        assert_eq!(restored.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
+        assert_eq!(
+            restored.get_project("p").unwrap().unwrap().name,
+            "Before upgrade"
+        );
+        assert!(restored.list_lifecycle("p").unwrap().is_empty());
+        let integrity: String = restored
+            .connection
+            .pragma_query_value(None, "integrity_check", |row| row.get(0))
+            .unwrap();
+        assert_eq!(integrity, "ok");
     }
 
     #[test]

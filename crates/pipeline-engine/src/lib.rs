@@ -9,7 +9,8 @@ use pipeline_store::Store;
 pub use pipeline_store::StoreError;
 pub use pipeline_store::{
     ActivityRecord, AgentCommand, AgentGrant, AgentReply, BriefRecord, CheckoutRecord,
-    DecisionInput, DecisionRecord, InboxItem, PlanRecord, PolicyRequestRecord, ResearchInput,
+    DecisionInput, DecisionRecord, DesignArtifactInput, DesignArtifactRecord, InboxItem,
+    LifecycleInput, LifecycleRecord, PlanRecord, PolicyRequestRecord, ReleaseRecord, ResearchInput,
     ResearchRecord, RunCheckpoint, RunRecord, TaskRecord, TaskRunReview,
 };
 use std::collections::BTreeMap;
@@ -581,6 +582,280 @@ impl ProjectEngine {
             inbox: self.store.list_inbox(project_id)?,
             activity: self.store.list_activity(project_id, 100)?,
         })
+    }
+
+    pub fn list_design_artifacts(&self, project_id: &str) -> Result<Vec<DesignArtifactRecord>> {
+        Ok(self.store.list_design_artifacts(project_id)?)
+    }
+
+    pub fn create_design_artifact(
+        &mut self,
+        project_id: &str,
+        input: &DesignArtifactInput,
+    ) -> Result<DesignArtifactRecord> {
+        Ok(self.store.create_design_artifact(
+            project_id,
+            input,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?)
+    }
+
+    pub fn revise_design_artifact(
+        &mut self,
+        project_id: &str,
+        root_id: &str,
+        expected_version: i64,
+        input: &DesignArtifactInput,
+    ) -> Result<DesignArtifactRecord> {
+        Ok(self.store.revise_design_artifact(
+            project_id,
+            root_id,
+            expected_version,
+            input,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?)
+    }
+
+    pub fn review_design_artifact(
+        &mut self,
+        project_id: &str,
+        root_id: &str,
+        expected_version: i64,
+        approve: bool,
+        note: &str,
+    ) -> Result<DesignArtifactRecord> {
+        Ok(self.store.review_design_artifact(
+            project_id,
+            root_id,
+            expected_version,
+            approve,
+            note,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?)
+    }
+
+    pub fn list_releases(&self, project_id: &str) -> Result<Vec<ReleaseRecord>> {
+        Ok(self.store.list_releases(project_id)?)
+    }
+
+    pub fn list_lifecycle(&self, project_id: &str) -> Result<Vec<LifecycleRecord>> {
+        Ok(self.store.list_lifecycle(project_id)?)
+    }
+
+    pub fn create_lifecycle(
+        &mut self,
+        project_id: &str,
+        input: &LifecycleInput,
+    ) -> Result<LifecycleRecord> {
+        Ok(self
+            .store
+            .create_lifecycle(project_id, input, "owner", &Uuid::new_v4().to_string())?)
+    }
+
+    pub fn revise_lifecycle(
+        &mut self,
+        project_id: &str,
+        id: &str,
+        revision: i64,
+        input: &LifecycleInput,
+    ) -> Result<LifecycleRecord> {
+        Ok(self.store.revise_lifecycle(
+            project_id,
+            id,
+            revision,
+            input,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?)
+    }
+
+    pub fn approve_publication(
+        &mut self,
+        project_id: &str,
+        id: &str,
+        revision: i64,
+    ) -> Result<String> {
+        Ok(self.store.approve_publication(
+            project_id,
+            id,
+            revision,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?)
+    }
+
+    pub fn record_manual_publication(
+        &mut self,
+        project_id: &str,
+        id: &str,
+        revision: i64,
+        approval_id: &str,
+    ) -> Result<LifecycleRecord> {
+        Ok(self.store.record_manual_publication(
+            project_id,
+            id,
+            revision,
+            approval_id,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?)
+    }
+
+    pub fn create_release(
+        &mut self,
+        project_id: &str,
+        version: &str,
+        commit: &str,
+        target: &str,
+        rollback: &str,
+    ) -> Result<ReleaseRecord> {
+        Ok(self.store.create_release(
+            project_id,
+            version,
+            commit,
+            target,
+            rollback,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?)
+    }
+
+    pub fn attach_release_artifact(
+        &mut self,
+        project_id: &str,
+        path: &Path,
+        kind: &str,
+        commit: Option<&str>,
+    ) -> Result<String> {
+        Ok(self.store.attach_release_artifact(
+            project_id,
+            path,
+            kind,
+            commit,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?)
+    }
+
+    pub fn add_release_build(
+        &mut self,
+        project_id: &str,
+        id: &str,
+        revision: i64,
+        artifact_id: &str,
+        platform: &str,
+    ) -> Result<ReleaseRecord> {
+        Ok(self.store.add_release_build(
+            project_id,
+            id,
+            revision,
+            artifact_id,
+            platform,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_release_check(
+        &mut self,
+        project_id: &str,
+        id: &str,
+        revision: i64,
+        name: &str,
+        required: bool,
+        status: &str,
+        evidence: Option<&str>,
+    ) -> Result<ReleaseRecord> {
+        Ok(self.store.set_release_check(
+            project_id,
+            id,
+            revision,
+            name,
+            required,
+            status,
+            evidence,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?)
+    }
+
+    pub fn approve_release(
+        &mut self,
+        project_id: &str,
+        id: &str,
+        revision: i64,
+    ) -> Result<ReleaseRecord> {
+        Ok(self.store.approve_release(
+            project_id,
+            id,
+            revision,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?)
+    }
+
+    pub fn approve_release_execution(
+        &mut self,
+        project_id: &str,
+        id: &str,
+        revision: i64,
+    ) -> Result<String> {
+        Ok(self.store.approve_release_execution(
+            project_id,
+            id,
+            revision,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_manual_deployment(
+        &mut self,
+        project_id: &str,
+        id: &str,
+        revision: i64,
+        approval_id: &str,
+        result: &str,
+        smoke: &str,
+        notes: &str,
+    ) -> Result<ReleaseRecord> {
+        Ok(self.store.record_manual_deployment(
+            project_id,
+            id,
+            revision,
+            approval_id,
+            result,
+            smoke,
+            notes,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?)
+    }
+
+    pub fn record_release_smoke(
+        &mut self,
+        project_id: &str,
+        id: &str,
+        revision: i64,
+        deployment_id: &str,
+        result: &str,
+        notes: &str,
+    ) -> Result<ReleaseRecord> {
+        Ok(self.store.record_release_smoke(
+            project_id,
+            id,
+            revision,
+            deployment_id,
+            result,
+            notes,
+            "owner",
+            &Uuid::new_v4().to_string(),
+        )?)
     }
 
     pub fn global_inbox(&self) -> Result<Vec<InboxItem>> {

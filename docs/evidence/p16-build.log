@@ -1,0 +1,4 @@
+   Compiling pipeline-store v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-store)
+   Compiling pipeline-engine v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-engine)
+   Compiling pipeline-app v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.90s

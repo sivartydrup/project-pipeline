@@ -1,0 +1,4 @@
+   Compiling pipeline-store v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-store)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.54s
+     Running `target\debug\examples\p17_release_record.exe`
+C:\devwork\project-pipeline\target\p17-sample\release-record.json

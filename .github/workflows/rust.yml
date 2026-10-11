@@ -1,6 +1,7 @@
 name: Rust checks
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - "Cargo.toml"
@@ -14,6 +15,9 @@ on:
       - "crates/**"
       - ".github/workflows/rust.yml"
 
+permissions:
+  contents: read
+
 jobs:
   check:
     strategy:
@@ -26,10 +30,30 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - run: rustc -vV
+      - name: Confirm Apple Silicon runner
+        if: runner.os == 'macOS'
+        run: test "$(uname -m)" = arm64
       - name: Linux GUI dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
-      - run: cargo build -p pipeline-app
+      - run: cargo build -p pipeline-app -p pipeline-cli
+      - name: Save Windows binaries
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-pipeline-windows-x86_64
+          path: |
+            target/debug/pipeline-app.exe
+            target/debug/pipeline-cli.exe
+      - name: Save Unix binaries
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-pipeline-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            target/debug/pipeline-app
+            target/debug/pipeline-cli

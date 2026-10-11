@@ -1,8 +1,9 @@
 use eframe::egui;
 use pipeline_engine::{
-    BriefContent, CriterionSpec, DecisionInput, DependencyKind, DependencySpec, DiscoveryView,
-    EpicSpec, InboxItem, MilestoneSpec, PlanContent, PlanView, ProjectEngine, ProjectOverview,
-    ResearchInput, ReviewView, TaskRunReview, TaskSpec,
+    BriefContent, CriterionSpec, DecisionInput, DependencyKind, DependencySpec,
+    DesignArtifactInput, DesignArtifactRecord, DiscoveryView, EpicSpec, InboxItem, LifecycleInput,
+    LifecycleRecord, MilestoneSpec, PlanContent, PlanView, ProjectEngine, ProjectOverview,
+    ReleaseRecord, ResearchInput, ReviewView, TaskRunReview, TaskSpec,
 };
 use pipeline_terminal::TerminalSession;
 use serde::{Deserialize, Serialize};
@@ -52,6 +53,9 @@ enum Tab {
     Research,
     Plan,
     Decisions,
+    Design,
+    Release,
+    Operations,
     Activity,
     Runs,
     About,
@@ -109,6 +113,20 @@ struct DesktopApp {
     decision_draft: DecisionInput,
     editing_decision: Option<String>,
     decision_message: Option<String>,
+    design_artifacts: Vec<DesignArtifactRecord>,
+    design_draft: DesignArtifactInput,
+    editing_design: Option<(String, i64)>,
+    design_note: String,
+    design_message: Option<String>,
+    releases: Vec<ReleaseRecord>,
+    release_draft: ReleaseDraft,
+    release_message: Option<String>,
+    lifecycle: Vec<LifecycleRecord>,
+    lifecycle_draft: LifecycleInput,
+    lifecycle_selected: String,
+    lifecycle_asset_path: String,
+    publication_approval_id: String,
+    lifecycle_message: Option<String>,
     selected_decision_options: BTreeMap<String, String>,
     evidence_drafts: BTreeMap<String, BTreeMap<String, String>>,
     new_dependency_from: String,
@@ -124,6 +142,25 @@ struct DesktopApp {
     active_terminal: Option<u64>,
     next_terminal_id: u64,
     terminal_message: Option<String>,
+}
+
+#[derive(Default)]
+struct ReleaseDraft {
+    version: String,
+    commit: String,
+    target: String,
+    rollback: String,
+    selected_id: String,
+    file_path: String,
+    platform: String,
+    check_name: String,
+    check_required: bool,
+    check_status: String,
+    check_evidence_path: String,
+    execution_approval_id: String,
+    deployment_result: String,
+    smoke_result: String,
+    notes: String,
 }
 
 impl Default for DesktopApp {
@@ -195,6 +232,34 @@ impl Default for DesktopApp {
             },
             editing_decision: None,
             decision_message: None,
+            design_artifacts: Vec::new(),
+            design_draft: DesignArtifactInput {
+                kind: "flow".into(),
+                ..Default::default()
+            },
+            editing_design: None,
+            design_note: String::new(),
+            design_message: None,
+            releases: Vec::new(),
+            release_draft: ReleaseDraft {
+                check_required: true,
+                check_status: "pending".into(),
+                deployment_result: "succeeded".into(),
+                smoke_result: "pending".into(),
+                ..Default::default()
+            },
+            release_message: None,
+            lifecycle: Vec::new(),
+            lifecycle_draft: LifecycleInput {
+                kind: "positioning".into(),
+                status: "draft".into(),
+                severity: "low".into(),
+                ..Default::default()
+            },
+            lifecycle_selected: String::new(),
+            lifecycle_asset_path: String::new(),
+            publication_approval_id: String::new(),
+            lifecycle_message: None,
             selected_decision_options: BTreeMap::new(),
             evidence_drafts: BTreeMap::new(),
             new_dependency_from: String::new(),
@@ -323,6 +388,9 @@ impl DesktopApp {
                 self.refresh_discovery();
                 self.refresh_plan();
                 self.refresh_review();
+                self.refresh_design();
+                self.refresh_releases();
+                self.refresh_lifecycle();
                 self.refresh_global_inbox();
             }
             Err(error) => self.message = Some(error.to_string()),
@@ -352,6 +420,8 @@ impl DesktopApp {
                                 self.active_tab = match item.kind.as_str() {
                                     "brief" => Tab::Brief,
                                     "plan" | "task" => Tab::Plan,
+                                    "release" => Tab::Release,
+                                    "operations" => Tab::Operations,
                                     _ => Tab::Decisions,
                                 };
                             }
@@ -423,6 +493,9 @@ impl DesktopApp {
         self.refresh_discovery();
         self.refresh_plan();
         self.refresh_review();
+        self.refresh_design();
+        self.refresh_releases();
+        self.refresh_lifecycle();
         self.refresh_runs();
     }
 
@@ -481,6 +554,812 @@ impl DesktopApp {
                 self.decision_message = None;
             }
             Err(error) => self.decision_message = Some(error.to_string()),
+        }
+    }
+
+    fn refresh_design(&mut self) {
+        self.design_artifacts.clear();
+        if let (Some(engine), Some(project_id)) = (&self.engine, &self.selected_project) {
+            match engine.list_design_artifacts(project_id) {
+                Ok(artifacts) => self.design_artifacts = artifacts,
+                Err(error) => self.design_message = Some(error.to_string()),
+            }
+        }
+    }
+
+    fn design_workspace(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Design and UX artifacts");
+        ui.label("Link a design version to an approved task or a decision. Files must be inside the project folder.");
+        if let Some(message) = &self.design_message {
+            ui.label(message);
+        }
+        let mut submit = false;
+        ui.collapsing(
+            if self.editing_design.is_some() {
+                "Revise artifact"
+            } else {
+                "Add artifact"
+            },
+            |ui| {
+                egui::ComboBox::from_label("Kind")
+                    .selected_text(&self.design_draft.kind)
+                    .show_ui(ui, |ui| {
+                        for kind in [
+                            "flow",
+                            "wireframe",
+                            "screenshot",
+                            "component",
+                            "copy",
+                            "asset",
+                            "accessibility",
+                        ] {
+                            ui.selectable_value(&mut self.design_draft.kind, kind.to_owned(), kind);
+                        }
+                    });
+                ui.horizontal(|ui| {
+                    ui.label("Title");
+                    ui.text_edit_singleline(&mut self.design_draft.title);
+                });
+                ui.label("Notes or copy");
+                ui.text_edit_multiline(&mut self.design_draft.body);
+                ui.horizontal(|ui| {
+                    ui.label("Project file (absolute path)");
+                    ui.text_edit_singleline(self.design_draft.uri.get_or_insert_default());
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Task ID");
+                    ui.text_edit_singleline(
+                        self.design_draft.task_logical_id.get_or_insert_default(),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Decision ID");
+                    ui.text_edit_singleline(self.design_draft.decision_id.get_or_insert_default());
+                });
+                ui.horizontal(|ui| {
+                    ui.label("MIME type");
+                    ui.text_edit_singleline(self.design_draft.mime_type.get_or_insert_default());
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Source run ID");
+                    ui.text_edit_singleline(
+                        self.design_draft.source_run_id.get_or_insert_default(),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Git commit");
+                    ui.text_edit_singleline(self.design_draft.git_commit.get_or_insert_default());
+                });
+                submit = ui
+                    .button(if self.editing_design.is_some() {
+                        "Save new version"
+                    } else {
+                        "Add for review"
+                    })
+                    .clicked();
+                if self.editing_design.is_some() && ui.button("Cancel revision").clicked() {
+                    self.editing_design = None;
+                    self.design_draft = DesignArtifactInput {
+                        kind: "flow".into(),
+                        ..Default::default()
+                    };
+                }
+            },
+        );
+        if submit {
+            let input = self.design_draft.clone();
+            let result = if let (Some(engine), Some(project_id)) =
+                (&mut self.engine, &self.selected_project)
+            {
+                if let Some((root, version)) = &self.editing_design {
+                    engine.revise_design_artifact(project_id, root, *version, &input)
+                } else {
+                    engine.create_design_artifact(project_id, &input)
+                }
+            } else {
+                return;
+            };
+            match result {
+                Ok(record) => {
+                    self.design_message = Some(format!(
+                        "Saved {} version {}",
+                        record.input.title, record.version
+                    ));
+                    self.design_draft = DesignArtifactInput {
+                        kind: "flow".into(),
+                        ..Default::default()
+                    };
+                    self.editing_design = None;
+                    self.refresh_design();
+                }
+                Err(error) => self.design_message = Some(error.to_string()),
+            }
+        }
+        ui.separator();
+        let mut action: Option<(String, i64, bool)> = None;
+        let mut edit: Option<DesignArtifactRecord> = None;
+        let mut seen = std::collections::BTreeSet::new();
+        for artifact in &self.design_artifacts {
+            let latest = seen.insert(artifact.root_id.clone());
+            ui.collapsing(
+                format!(
+                    "{} v{} · {} · {}{}",
+                    artifact.input.title,
+                    artifact.version,
+                    artifact.input.kind,
+                    artifact.status,
+                    if latest { "" } else { " · prior version" }
+                ),
+                |ui| {
+                    ui.label(format!("SHA-256: {}", artifact.sha256));
+                    if let Some(uri) = &artifact.input.uri {
+                        ui.label(format!("File: {uri}"));
+                    }
+                    if let Some(task) = &artifact.input.task_logical_id {
+                        ui.label(format!("Task: {task}"));
+                    }
+                    if let Some(decision) = &artifact.input.decision_id {
+                        ui.label(format!("Decision: {decision}"));
+                    }
+                    if let Some(run) = &artifact.input.source_run_id {
+                        ui.label(format!("Run: {run}"));
+                    }
+                    if let Some(commit) = &artifact.input.git_commit {
+                        ui.label(format!("Commit: {commit}"));
+                    }
+                    if !artifact.input.body.is_empty() {
+                        ui.label(&artifact.input.body);
+                    }
+                    if let Some(note) = &artifact.review_note {
+                        ui.label(format!("Review: {note}"));
+                    }
+                    ui.label(format!(
+                        "Created by {} at {}",
+                        artifact.actor, artifact.created_at
+                    ));
+                    if latest {
+                        if artifact.status == "in_review" {
+                            ui.horizontal(|ui| {
+                                if ui.button("Approve version").clicked() {
+                                    action =
+                                        Some((artifact.root_id.clone(), artifact.version, true));
+                                }
+                                if ui.button("Request revision").clicked() {
+                                    action =
+                                        Some((artifact.root_id.clone(), artifact.version, false));
+                                }
+                            });
+                        }
+                        if ui.button("Create next version").clicked() {
+                            edit = Some(artifact.clone());
+                        }
+                    }
+                },
+            );
+        }
+        ui.horizontal(|ui| {
+            ui.label("Review note");
+            ui.text_edit_singleline(&mut self.design_note);
+        });
+        if let Some(record) = edit {
+            self.editing_design = Some((record.root_id, record.version));
+            self.design_draft = record.input;
+        }
+        if let (Some((root, version, approve)), Some(engine), Some(project_id)) =
+            (action, &mut self.engine, &self.selected_project)
+        {
+            match engine.review_design_artifact(
+                project_id,
+                &root,
+                version,
+                approve,
+                &self.design_note,
+            ) {
+                Ok(_) => {
+                    self.design_message = Some("Review recorded".into());
+                    self.design_note.clear();
+                    self.refresh_design();
+                }
+                Err(error) => self.design_message = Some(error.to_string()),
+            }
+        }
+    }
+
+    fn refresh_releases(&mut self) {
+        self.releases.clear();
+        if let (Some(engine), Some(project_id)) = (&self.engine, &self.selected_project) {
+            match engine.list_releases(project_id) {
+                Ok(records) => self.releases = records,
+                Err(error) => self.release_message = Some(error.to_string()),
+            }
+        }
+    }
+
+    fn refresh_lifecycle(&mut self) {
+        self.lifecycle.clear();
+        if let (Some(engine), Some(project_id)) = (&self.engine, &self.selected_project) {
+            match engine.list_lifecycle(project_id) {
+                Ok(records) => self.lifecycle = records,
+                Err(error) => self.lifecycle_message = Some(error.to_string()),
+            }
+        }
+    }
+
+    fn lifecycle_workspace(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Launch and operations");
+        ui.label("Plan channels and content, record metrics and feedback, and track bugs, incidents, and maintenance. Publication requires a separate owner approval for exact content and target.");
+        if let Some(message) = &self.lifecycle_message {
+            ui.label(message);
+        }
+        let mut action = None::<&'static str>;
+        ui.collapsing("Create or revise record", |ui| {
+            egui::ComboBox::from_label("Kind")
+                .selected_text(&self.lifecycle_draft.kind)
+                .show_ui(ui, |ui| {
+                    for kind in [
+                        "positioning",
+                        "launch_copy",
+                        "launch_asset",
+                        "channel_plan",
+                        "metric",
+                        "feedback",
+                        "bug",
+                        "incident",
+                        "maintenance",
+                    ] {
+                        ui.selectable_value(&mut self.lifecycle_draft.kind, kind.into(), kind);
+                    }
+                });
+            ui.horizontal(|ui| {
+                ui.label("Title");
+                ui.text_edit_singleline(&mut self.lifecycle_draft.title);
+            });
+            ui.label("Details / copy");
+            ui.text_edit_multiline(&mut self.lifecycle_draft.body);
+            ui.horizontal(|ui| {
+                ui.label("Channel");
+                ui.text_edit_singleline(&mut self.lifecycle_draft.channel);
+            });
+            if self.lifecycle_draft.kind == "metric" {
+                ui.horizontal(|ui| {
+                    ui.label("Value");
+                    ui.text_edit_singleline(&mut self.lifecycle_draft.metric_value);
+                    ui.label("Unit");
+                    ui.text_edit_singleline(&mut self.lifecycle_draft.metric_unit);
+                });
+            }
+            egui::ComboBox::from_label("Status")
+                .selected_text(&self.lifecycle_draft.status)
+                .show_ui(ui, |ui| {
+                    for status in ["draft", "open", "in_progress", "blocked", "resolved"] {
+                        ui.selectable_value(
+                            &mut self.lifecycle_draft.status,
+                            status.into(),
+                            status,
+                        );
+                    }
+                });
+            egui::ComboBox::from_label("Severity")
+                .selected_text(&self.lifecycle_draft.severity)
+                .show_ui(ui, |ui| {
+                    for severity in ["low", "medium", "high", "critical"] {
+                        ui.selectable_value(
+                            &mut self.lifecycle_draft.severity,
+                            severity.into(),
+                            severity,
+                        );
+                    }
+                });
+            ui.horizontal(|ui| {
+                ui.label("Task logical ID (optional)");
+                ui.text_edit_singleline(
+                    self.lifecycle_draft.task_logical_id.get_or_insert_default(),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label("Artifact ID (optional)");
+                ui.text_edit_singleline(self.lifecycle_draft.artifact_id.get_or_insert_default());
+            });
+            if self.lifecycle_draft.kind == "launch_asset" {
+                ui.horizontal(|ui| {
+                    ui.label("Project asset file");
+                    ui.text_edit_singleline(&mut self.lifecycle_asset_path);
+                });
+                if ui.button("Attach asset file").clicked() {
+                    action = Some("asset");
+                }
+            }
+            ui.horizontal(|ui| {
+                ui.label("External publication target (optional)");
+                ui.text_edit_singleline(&mut self.lifecycle_draft.publication_target);
+            });
+            if ui
+                .button(if self.lifecycle_selected.is_empty() {
+                    "Create record"
+                } else {
+                    "Save revision"
+                })
+                .clicked()
+            {
+                action = Some("save");
+            }
+            if !self.lifecycle_selected.is_empty() && ui.button("New record instead").clicked() {
+                self.lifecycle_selected.clear();
+                self.lifecycle_draft = LifecycleInput {
+                    kind: "positioning".into(),
+                    status: "draft".into(),
+                    severity: "low".into(),
+                    ..Default::default()
+                };
+            }
+        });
+        ui.separator();
+        let mut selected = None::<LifecycleRecord>;
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for entry in &self.lifecycle {
+                ui.group(|ui| {
+                    ui.strong(format!(
+                        "{} · {} · {}",
+                        entry.input.kind, entry.input.title, entry.input.status
+                    ));
+                    ui.label(format!(
+                        "{} severity · revision {} · {}",
+                        entry.input.severity, entry.revision, entry.created_at
+                    ));
+                    if !entry.input.body.is_empty() {
+                        ui.label(&entry.input.body);
+                    }
+                    if !entry.input.channel.is_empty() {
+                        ui.label(format!("Channel: {}", entry.input.channel));
+                    }
+                    if !entry.input.metric_value.is_empty() {
+                        ui.label(format!(
+                            "Metric: {} {}",
+                            entry.input.metric_value, entry.input.metric_unit
+                        ));
+                    }
+                    if !entry.input.publication_target.is_empty() {
+                        ui.label(format!(
+                            "Publication target: {}",
+                            entry.input.publication_target
+                        ));
+                    }
+                    if let Some(artifact) = &entry.input.artifact_id {
+                        ui.label(format!("Artifact: {artifact}"));
+                    }
+                    if ui.button("Edit / review").clicked() {
+                        selected = Some(entry.clone());
+                    }
+                    if self.lifecycle_selected == entry.id
+                        && entry.input.status != "published"
+                        && matches!(
+                            entry.input.kind.as_str(),
+                            "positioning" | "launch_copy" | "launch_asset" | "channel_plan"
+                        )
+                        && !entry.input.publication_target.is_empty()
+                    {
+                        if ui
+                            .button("Approve exact content and target for publication")
+                            .clicked()
+                        {
+                            action = Some("approve");
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label("Publication approval ID");
+                            ui.text_edit_singleline(&mut self.publication_approval_id);
+                        });
+                        if ui.button("Record manual publication").clicked() {
+                            action = Some("publish");
+                        }
+                    }
+                });
+            }
+        });
+        if let Some(entry) = selected {
+            self.lifecycle_selected = entry.id;
+            self.lifecycle_draft = entry.input;
+        }
+        let Some(project_id) = self.selected_project.clone() else {
+            return;
+        };
+        let Some(engine) = &mut self.engine else {
+            return;
+        };
+        let result = match action {
+            Some("asset") => engine
+                .attach_release_artifact(
+                    &project_id,
+                    Path::new(&self.lifecycle_asset_path),
+                    "launch-asset",
+                    None,
+                )
+                .map(|id| {
+                    self.lifecycle_draft.artifact_id = Some(id.clone());
+                    format!("Asset attached: {id}")
+                }),
+            Some("save") => {
+                let mut input = self.lifecycle_draft.clone();
+                if input
+                    .task_logical_id
+                    .as_deref()
+                    .is_some_and(|s| s.trim().is_empty())
+                {
+                    input.task_logical_id = None;
+                }
+                if input
+                    .artifact_id
+                    .as_deref()
+                    .is_some_and(|s| s.trim().is_empty())
+                {
+                    input.artifact_id = None;
+                }
+                if self.lifecycle_selected.is_empty() {
+                    engine.create_lifecycle(&project_id, &input).map(|r| {
+                        self.lifecycle_selected = r.id;
+                        "Record created".to_owned()
+                    })
+                } else {
+                    let id = self.lifecycle_selected.clone();
+                    let revision = self
+                        .lifecycle
+                        .iter()
+                        .find(|r| r.id == id)
+                        .map_or(0, |r| r.revision);
+                    engine
+                        .revise_lifecycle(&project_id, &id, revision, &input)
+                        .map(|_| "Revision saved".into())
+                }
+            }
+            Some("approve") => {
+                let r = self
+                    .lifecycle
+                    .iter()
+                    .find(|r| r.id == self.lifecycle_selected)
+                    .unwrap();
+                engine
+                    .approve_publication(&project_id, &r.id, r.revision)
+                    .map(|id| {
+                        self.publication_approval_id = id.clone();
+                        format!("Publication approval: {id}")
+                    })
+            }
+            Some("publish") => {
+                let r = self
+                    .lifecycle
+                    .iter()
+                    .find(|r| r.id == self.lifecycle_selected)
+                    .unwrap();
+                engine
+                    .record_manual_publication(
+                        &project_id,
+                        &r.id,
+                        r.revision,
+                        &self.publication_approval_id,
+                    )
+                    .map(|_| "Manual publication recorded".into())
+            }
+            _ => return,
+        };
+        match result {
+            Ok(message) => {
+                self.lifecycle_message = Some(message);
+                self.refresh_lifecycle();
+                self.refresh_review();
+                self.refresh_global_inbox();
+                if let Some(engine) = &self.engine
+                    && let Ok(projects) = engine.list_overviews()
+                {
+                    self.projects = projects;
+                }
+            }
+            Err(error) => self.lifecycle_message = Some(error.to_string()),
+        }
+    }
+
+    fn release_workspace(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Release candidates");
+        ui.label("Record the exact build and checks before readiness approval. Production execution needs its own owner approval.");
+        if let Some(message) = &self.release_message {
+            ui.label(message);
+        }
+        let mut action = None::<&'static str>;
+        ui.collapsing("Create candidate", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Version");
+                ui.text_edit_singleline(&mut self.release_draft.version);
+            });
+            ui.horizontal(|ui| {
+                ui.label("Full Git commit");
+                ui.text_edit_singleline(&mut self.release_draft.commit);
+            });
+            ui.horizontal(|ui| {
+                ui.label("Deployment target");
+                ui.text_edit_singleline(&mut self.release_draft.target);
+            });
+            ui.label("Rollback procedure");
+            ui.text_edit_multiline(&mut self.release_draft.rollback);
+            if ui.button("Create release candidate").clicked() {
+                action = Some("create");
+            }
+        });
+        ui.separator();
+        egui::ComboBox::from_label("Candidate")
+            .selected_text(
+                self.releases
+                    .iter()
+                    .find(|r| r.id == self.release_draft.selected_id)
+                    .map_or("Select a candidate".to_owned(), |r| {
+                        format!("{} · {}", r.version, r.status)
+                    }),
+            )
+            .show_ui(ui, |ui| {
+                for r in &self.releases {
+                    ui.selectable_value(
+                        &mut self.release_draft.selected_id,
+                        r.id.clone(),
+                        format!("{} · {} · {}", r.version, r.target, r.status),
+                    );
+                }
+            });
+        let selected = self
+            .releases
+            .iter()
+            .find(|r| r.id == self.release_draft.selected_id)
+            .cloned();
+        if let Some(r) = &selected {
+            ui.label(format!(
+                "Commit: {} · target: {} · revision {}",
+                r.git_commit, r.target, r.revision
+            ));
+            ui.label(format!("Rollback: {}", r.rollback_notes));
+            ui.collapsing(format!("Builds ({})", r.builds.len()), |ui| {
+                for b in &r.builds {
+                    ui.label(format!("{} · {} · SHA-256 {}", b.platform, b.uri, b.sha256));
+                }
+            });
+            ui.collapsing(format!("Checks ({})", r.checks.len()), |ui| {
+                for c in &r.checks {
+                    ui.label(format!(
+                        "{} · {} · {} · evidence {} · SHA-256 {}",
+                        c.name,
+                        if c.required { "required" } else { "optional" },
+                        c.status,
+                        c.evidence_artifact_id.as_deref().unwrap_or("none"),
+                        c.evidence_sha256.as_deref().unwrap_or("none")
+                    ));
+                }
+            });
+            if r.status == "draft" {
+                ui.collapsing("Attach build from project folder", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Build file");
+                        ui.text_edit_singleline(&mut self.release_draft.file_path);
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Platform");
+                        ui.text_edit_singleline(&mut self.release_draft.platform);
+                    });
+                    if ui.button("Attach build").clicked() {
+                        action = Some("build");
+                    }
+                });
+                ui.collapsing("Record quality, security, or privacy check", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Check name");
+                        ui.text_edit_singleline(&mut self.release_draft.check_name);
+                    });
+                    ui.checkbox(&mut self.release_draft.check_required, "Required");
+                    egui::ComboBox::from_label("Result")
+                        .selected_text(&self.release_draft.check_status)
+                        .show_ui(ui, |ui| {
+                            for status in ["pending", "failed", "passed"] {
+                                ui.selectable_value(
+                                    &mut self.release_draft.check_status,
+                                    status.into(),
+                                    status,
+                                );
+                            }
+                        });
+                    ui.horizontal(|ui| {
+                        ui.label("Evidence file");
+                        ui.text_edit_singleline(&mut self.release_draft.check_evidence_path);
+                    });
+                    if ui.button("Save check").clicked() {
+                        action = Some("check");
+                    }
+                });
+                if ui.button("Approve release readiness").clicked() {
+                    action = Some("approve");
+                }
+            }
+            if r.status == "approved" {
+                if ui
+                    .button(format!("Approve manual execution for {}", r.target))
+                    .clicked()
+                {
+                    action = Some("execute_approve");
+                }
+                ui.label("Manual deployment result (the app does not execute deployment)");
+                ui.horizontal(|ui| {
+                    ui.label("Execution approval ID");
+                    ui.text_edit_singleline(&mut self.release_draft.execution_approval_id);
+                });
+                egui::ComboBox::from_label("Deployment result")
+                    .selected_text(&self.release_draft.deployment_result)
+                    .show_ui(ui, |ui| {
+                        for status in ["succeeded", "failed"] {
+                            ui.selectable_value(
+                                &mut self.release_draft.deployment_result,
+                                status.into(),
+                                status,
+                            );
+                        }
+                    });
+                egui::ComboBox::from_label("Smoke result")
+                    .selected_text(&self.release_draft.smoke_result)
+                    .show_ui(ui, |ui| {
+                        for status in ["pending", "passed", "failed"] {
+                            ui.selectable_value(
+                                &mut self.release_draft.smoke_result,
+                                status.into(),
+                                status,
+                            );
+                        }
+                    });
+                ui.label("Deployment notes");
+                ui.text_edit_multiline(&mut self.release_draft.notes);
+                if ui.button("Record manual deployment").clicked() {
+                    action = Some("deploy");
+                }
+            }
+            for d in &r.deployments {
+                ui.label(format!(
+                    "Deployment {} · {} · smoke {} · {}",
+                    d.id, d.result, d.smoke_result, d.notes
+                ));
+                if d.smoke_result == "pending" {
+                    egui::ComboBox::from_label("Later smoke result")
+                        .selected_text(&self.release_draft.smoke_result)
+                        .show_ui(ui, |ui| {
+                            for status in ["passed", "failed"] {
+                                ui.selectable_value(
+                                    &mut self.release_draft.smoke_result,
+                                    status.into(),
+                                    status,
+                                );
+                            }
+                        });
+                    ui.text_edit_singleline(&mut self.release_draft.notes);
+                    if ui.button("Record smoke result").clicked() {
+                        action = Some("smoke");
+                    }
+                }
+            }
+        }
+        let Some(project_id) = self.selected_project.clone() else {
+            return;
+        };
+        let Some(engine) = &mut self.engine else {
+            return;
+        };
+        let result = match action {
+            Some("create") => engine
+                .create_release(
+                    &project_id,
+                    &self.release_draft.version,
+                    &self.release_draft.commit,
+                    &self.release_draft.target,
+                    &self.release_draft.rollback,
+                )
+                .map(|r| {
+                    self.release_draft.selected_id = r.id;
+                    "Candidate created".to_owned()
+                }),
+            Some("build") => selected.as_ref().map_or_else(
+                || Ok(String::new()),
+                |r| {
+                    let artifact = engine.attach_release_artifact(
+                        &project_id,
+                        Path::new(&self.release_draft.file_path),
+                        "build",
+                        Some(&r.git_commit),
+                    )?;
+                    engine.add_release_build(
+                        &project_id,
+                        &r.id,
+                        r.revision,
+                        &artifact,
+                        &self.release_draft.platform,
+                    )?;
+                    Ok("Build attached".into())
+                },
+            ),
+            Some("check") => selected.as_ref().map_or_else(
+                || Ok(String::new()),
+                |r| {
+                    let evidence = if self.release_draft.check_evidence_path.trim().is_empty() {
+                        None
+                    } else {
+                        Some(engine.attach_release_artifact(
+                            &project_id,
+                            Path::new(&self.release_draft.check_evidence_path),
+                            "check-log",
+                            Some(&r.git_commit),
+                        )?)
+                    };
+                    engine.set_release_check(
+                        &project_id,
+                        &r.id,
+                        r.revision,
+                        &self.release_draft.check_name,
+                        self.release_draft.check_required,
+                        &self.release_draft.check_status,
+                        evidence.as_deref(),
+                    )?;
+                    Ok("Check saved".into())
+                },
+            ),
+            Some("approve") => engine
+                .approve_release(
+                    &project_id,
+                    &selected.as_ref().unwrap().id,
+                    selected.as_ref().unwrap().revision,
+                )
+                .map(|_| "Readiness approved".into()),
+            Some("execute_approve") => engine
+                .approve_release_execution(
+                    &project_id,
+                    &selected.as_ref().unwrap().id,
+                    selected.as_ref().unwrap().revision,
+                )
+                .map(|id| {
+                    self.release_draft.execution_approval_id = id.clone();
+                    format!("Execution approval: {id}")
+                }),
+            Some("deploy") => engine
+                .record_manual_deployment(
+                    &project_id,
+                    &selected.as_ref().unwrap().id,
+                    selected.as_ref().unwrap().revision,
+                    &self.release_draft.execution_approval_id,
+                    &self.release_draft.deployment_result,
+                    &self.release_draft.smoke_result,
+                    &self.release_draft.notes,
+                )
+                .map(|_| "Deployment recorded".into()),
+            Some("smoke") => {
+                let r = selected.as_ref().unwrap();
+                let d = r
+                    .deployments
+                    .iter()
+                    .find(|d| d.smoke_result == "pending")
+                    .unwrap();
+                engine
+                    .record_release_smoke(
+                        &project_id,
+                        &r.id,
+                        r.revision,
+                        &d.id,
+                        &self.release_draft.smoke_result,
+                        &self.release_draft.notes,
+                    )
+                    .map(|_| "Smoke result recorded".into())
+            }
+            _ => return,
+        };
+        match result {
+            Ok(message) => {
+                self.release_message = Some(message);
+                self.refresh_releases();
+                self.refresh_review();
+                self.refresh_global_inbox();
+                if let Some(engine) = &self.engine
+                    && let Ok(projects) = engine.list_overviews()
+                {
+                    self.projects = projects;
+                }
+            }
+            Err(error) => self.release_message = Some(error.to_string()),
         }
     }
 
@@ -893,6 +1772,23 @@ impl DesktopApp {
             if let Some(status) = tab.session.exit_status() {
                 ui.label(format!("Shell exited: {status}"));
             }
+            ui.collapsing("Readable terminal transcript", |ui| {
+                let transcript = tab.session.contents();
+                ui.horizontal(|ui| {
+                    ui.label("Current visible screen, read only");
+                    if ui.button("Copy transcript").clicked() {
+                        ui.ctx().copy_text(transcript.clone());
+                    }
+                });
+                egui::ScrollArea::vertical()
+                    .max_height(160.0)
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(&transcript).monospace())
+                                .selectable(true),
+                        );
+                    });
+            });
             Self::terminal_screen(ui, tab);
         } else if let Some(project) = self
             .projects
@@ -1956,6 +2852,8 @@ impl DesktopApp {
                         "decision" => Some((Tab::Decisions, "Open decision register")),
                         "brief" => Some((Tab::Brief, "Open brief")),
                         "plan" | "task" | "criterion" => Some((Tab::Plan, "Open plan")),
+                        "release" => Some((Tab::Release, "Open release")),
+                        "lifecycle" => Some((Tab::Operations, "Open launch and operations")),
                         _ => None,
                     };
                     if let Some((tab, label)) = destination
@@ -2157,6 +3055,9 @@ impl DesktopApp {
                 (Tab::Research, "Research"),
                 (Tab::Plan, "Plan"),
                 (Tab::Decisions, "Decisions"),
+                (Tab::Design, "Design"),
+                (Tab::Release, "Release"),
+                (Tab::Operations, "Launch & Ops"),
                 (Tab::Activity, "Activity"),
                 (Tab::Runs, "Runs"),
                 (Tab::About, "About"),
@@ -2210,6 +3111,9 @@ impl DesktopApp {
             Tab::Decisions => {
                 self.decisions_workspace(ui);
             }
+            Tab::Design => self.design_workspace(ui),
+            Tab::Release => self.release_workspace(ui),
+            Tab::Operations => self.lifecycle_workspace(ui),
             Tab::Activity => self.activity_workspace(ui),
             Tab::Runs => {
                 self.runs_workspace(ui);

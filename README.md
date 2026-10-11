@@ -2,7 +2,7 @@
 
 Project Pipeline is a planned cross-platform, local-first desktop application for taking software products from idea to launch and ongoing operation. It combines a project portfolio, a detailed product workspace, an integrated terminal, and supervised AI agent runs.
 
-**Status:** baseline approved on 8 October 2026; implementation underway. See [approval record](docs/approval-2026-10-08.md).
+**Status:** Windows foundation through launch and operations is implemented. Release hardening is in progress; native M1 Max verification and release candidate approval remain open. See [implementation progress](plan/progress.md).
 
 ## Read first
 
@@ -17,11 +17,11 @@ Project Pipeline is a planned cross-platform, local-first desktop application fo
 
 The owner can capture an idea, approve a product brief and executable plan, then let agents make bounded progress across research, design, implementation, tests, release, and launch. The owner sees what was done, why, with what evidence, and which decisions need attention.
 
-## Initial scope
+## Current scope
 
-The first usable release targets one owner on Windows and Apple Silicon macOS, with local project folders and local data. Linux remains a portability and CI target, with release support following primary-platform validation. It connects to an installed agent harness rather than bundling a model or provider account. The first end-to-end workflow is idea → approved brief → task plan → agent implementation → review → verified release candidate. Deployment and marketing are represented in the model and plan; provider-specific automation follows after the core workflow is reliable.
+The first usable release targets one owner on Windows and Apple Silicon macOS, with local project folders and local data. Linux remains a portability and CI target. The app connects to an installed OpenCode or Pi harness; it does not bundle a model, provider account, or credentials. The workflow covers idea → approved brief → task plan → agent implementation → evidence review → design/release/launch/operation records. Deployment and publication are recorded manually behind separate scoped approvals; the app does not execute them.
 
-## Build the current foundation
+## Build and run
 
 Install a current Rust toolchain, then run:
 
@@ -29,10 +29,15 @@ Install a current Rust toolchain, then run:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo build -p pipeline-app -p pipeline-cli
 cargo run -p pipeline-app
 ```
 
-The desktop imports existing folders and Git repositories, creates project folders, and shows projects from a local SQLite database. Portfolio stage, health, blocked count, and verified completion come from persisted state. The Brief and Research views support guided idea intake, versioned briefs, source-aware research, and exact-revision approval. The Plan view supports epics, weighted tasks, criteria, dependencies, scope approval, and manual evidence-based task review. The lower panel has project-scoped PTY terminal tabs. Agent runs remain a later integration. Set `PIPELINE_DATA_DIR` to use a separate local data directory for a test profile. The `spikes/` directory contains the initial UI and PTY prototypes and is excluded from the main Cargo workspace. See [implementation progress](plan/progress.md) for remaining verification.
+Keep `pipeline-app` and `pipeline-cli` in the same directory. The desktop has a local SQLite portfolio, guided brief/plan approval, a project-scoped terminal, supervised OpenCode and Pi runs, evidence review, and design, release, launch, and operations workspaces. Set `PIPELINE_DATA_DIR` to use a separate local data directory for a test profile. Agent runs require the selected harness executable and its provider/model configuration; prompts incur the provider's own terms and costs. The `spikes/` directory contains the initial UI and PTY prototypes and is excluded from the main Cargo workspace.
+
+On Windows, `powershell -File scripts/package-windows.ps1` builds a portable release archive and SHA-256 checksum under ignored `dist/`. Extract both executables to one folder and run `pipeline-app.exe`. Back up the app data directory before upgrading. Native Apple Silicon installation and smoke verification remain a release gate; a macOS binary should be built on macOS with `cargo build --release -p pipeline-app -p pipeline-cli` and both executables kept together.
+
+The current Windows archive is unsigned and intended for local evaluation. Public distribution awaits release approval and, where available, Windows signing and macOS notarization.
 
 ## Approval boundary
 

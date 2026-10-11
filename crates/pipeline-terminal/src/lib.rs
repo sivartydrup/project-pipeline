@@ -283,4 +283,24 @@ mod tests {
         session.close().unwrap();
         assert!(session.exit_status().is_some());
     }
+
+    #[test]
+    fn large_output_remains_responsive_with_bounded_configuration() {
+        let start = Instant::now();
+        let mut parser = Parser::new(24, 80, SCROLLBACK_ROWS);
+        for index in 0..50_000 {
+            parser.process(format!("line-{index:05}\r\n").as_bytes());
+        }
+        let visible = parser.screen().contents();
+        assert!(
+            visible.len() < 4_000,
+            "visible terminal buffer grew unexpectedly"
+        );
+        assert!(visible.contains("line-49999"));
+        eprintln!(
+            "processed 50000 lines in {:?}, visible bytes {}",
+            start.elapsed(),
+            visible.len()
+        );
+    }
 }

@@ -1,0 +1,9 @@
+   Compiling pipeline-store v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-store)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.66s
+     Running unittests src\lib.rs (target\debug\deps\pipeline_store-f83fe9514463a860.exe)
+
+running 2 tests
+test operations::tests::publication_is_exact_revision_target_and_one_use ... ok
+test operations::tests::latest_release_and_operations_blockers_are_derived ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 39 filtered out; finished in 0.07s

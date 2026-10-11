@@ -1,0 +1,43 @@
+{
+  "failed_required_check_blocked_approval": "invalid release: build and passing required checks needed",
+  "release": {
+    "builds": [
+      {
+        "artifact_id": "f363d7a8-ec09-4d18-8f2b-fa4fad1213c2",
+        "id": "1dc03a19-da35-4b7f-b823-8194ca3bf442",
+        "platform": "windows-x86_64",
+        "sha256": "7f774c8bdae39215a605e6ea224071df1e164bc43aa870214be0cbda11d0e670",
+        "uri": "C:\\devwork\\project-pipeline\\target\\p17-sample\\app.exe"
+      }
+    ],
+    "checks": [
+      {
+        "evidence_artifact_id": "9a00a2ca-4d6f-4c31-ace7-f0e6d6074880",
+        "evidence_sha256": "b8480b6600c7281c52d196bc26dbb1ee49f2f1040513f4a4f979a92c5d0af8be",
+        "id": "d08e45eb-7aed-4bc5-90bd-b96f6dcd97a6",
+        "name": "quality",
+        "required": true,
+        "status": "passed"
+      }
+    ],
+    "deployments": [
+      {
+        "actor": "owner",
+        "created_at": "2026-10-11 02:13:40",
+        "execution_approval_id": "c522c716-9d02-4cc5-9aa7-f8a3ce7acc31",
+        "id": "d75332ff-634a-4f35-a655-cc08fd34abe3",
+        "notes": "Manual procedure completed\nSmoke: Launch smoke checks passed",
+        "result": "succeeded",
+        "smoke_result": "passed"
+      }
+    ],
+    "git_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "id": "0288c2ff-6bb9-4e1b-a088-0464c136706d",
+    "project_id": "sample",
+    "revision": 7,
+    "rollback_notes": "Restore previous artifact and data backup",
+    "status": "deployed",
+    "target": "sample production",
+    "version": "1.0.0"
+  }
+}

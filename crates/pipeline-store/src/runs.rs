@@ -1059,7 +1059,10 @@ mod tests {
         }
         drop(connection);
         let store = Store::open(&database).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 9);
+        assert_eq!(
+            store.schema_version().unwrap(),
+            crate::CURRENT_SCHEMA_VERSION
+        );
         assert_eq!(store.get_run("r1").unwrap().state, "queued");
         assert_eq!(store.get_run("r2").unwrap().state, "cancelled");
         assert!(database.with_extension("pre-v6.sqlite").exists());
@@ -1084,7 +1087,10 @@ mod tests {
         }
         drop(connection);
         let store = Store::open(&database).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 9);
+        assert_eq!(
+            store.schema_version().unwrap(),
+            crate::CURRENT_SCHEMA_VERSION
+        );
         assert!(database.with_extension("pre-v7.sqlite").exists());
         let table: String = store
             .connection
