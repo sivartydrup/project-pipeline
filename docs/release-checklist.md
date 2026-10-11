@@ -4,7 +4,7 @@ Status: **in progress** on 11 October 2026. This checklist records evidence and 
 
 | Gate | Status | Evidence / next step |
 | --- | --- | --- |
-| Windows build and app launch | Passed portable archive smoke | [Final package log](evidence/p19-windows-package-final.log) and [extracted app launch](evidence/p19-windows-package-smoke.md); archive SHA-256 verified. |
+| Windows build and app launch | Passed portable archive smoke | [Clean-commit package log](evidence/p19-windows-package-commit.log) and [extracted app launch](evidence/p19-windows-package-smoke.md); archive SHA-256 and embedded revision verified. |
 | Windows onboarding/import, planning, review, export, manual release | Partial | Earlier phase journeys passed; repeat from packaged binary before final acceptance. |
 | Windows terminal and agent run/recovery | Partial | P07/P12/P14/P15 Windows evidence exists. Hands-on terminal input through UI remains pending. |
 | Migration and restore | Passed local focused check | [P19 migration/restore log](evidence/p19-migration-restore.log). |
@@ -16,6 +16,6 @@ Status: **in progress** on 11 October 2026. This checklist records evidence and 
 | Signing and notarization | Not configured | No signing/notarization identities have been provided. The Windows archive is unsigned and intended for local evaluation only; macOS notarization is unverified. Public distribution remains gated. |
 | Scoped owner release approval | Not granted | Required before any deployment or publication. |
 
-The final combined Windows workspace [tests](evidence/p19-final-windows-tests.log), [Clippy](evidence/p19-final-windows-clippy.log), and format check passed after the focused security repairs. The portable archive must be rebuilt from that final commit to refresh its provenance manifest.
+The final combined Windows workspace [tests](evidence/p19-final-windows-tests.log), [Clippy](evidence/p19-final-windows-clippy.log), and [format check](evidence/p19-final-windows-fmt.log) passed after the focused security repairs. The portable archive was rebuilt from clean commit `3f30b83` with an embedded provenance manifest.
 
 No deployment, publication, purchase, or production credential change is authorized by this checklist.

@@ -1,0 +1,8 @@
+   Compiling pipeline-store v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-store)
+   Compiling pipeline-engine v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-engine)
+   Compiling pipeline-api v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-api)
+   Compiling pipeline-cli v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-cli)
+   Compiling pipeline-app v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-app)
+    Finished `release` profile [optimized] target(s) in 51.88s
+Archive: C:\devwork\project-pipeline\dist\project-pipeline-0.1.0-windows-x86_64-20261011-135739.zip
+SHA-256: b61bec8bda05dc5531204ea390f70ec46fab0883ea2c7b044d52461dc19fc226
