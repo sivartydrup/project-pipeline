@@ -1,0 +1,2 @@
+cargo fmt --all --check
+Exit code: 0 (11 October 2026, Windows x86_64). Cargo emitted no diagnostics.

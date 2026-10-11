@@ -1,5 +1,5 @@
 use super::discovery::insert_event;
-use super::{Result, Store, StoreError, validate_nonempty};
+use super::{Result, Store, StoreError, reject_sensitive_text, validate_nonempty};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -61,6 +61,7 @@ impl Store {
         actor: &str,
         correlation_id: &str,
     ) -> Result<DesignArtifactRecord> {
+        reject_sensitive_text(&serde_json::to_string(input)?)?;
         validate_nonempty("actor", actor)?;
         validate_nonempty("correlation_id", correlation_id)?;
         let normalized = normalize_input(input);
@@ -104,6 +105,7 @@ impl Store {
         actor: &str,
         correlation_id: &str,
     ) -> Result<DesignArtifactRecord> {
+        reject_sensitive_text(&serde_json::to_string(input)?)?;
         validate_nonempty("actor", actor)?;
         validate_nonempty("correlation_id", correlation_id)?;
         let normalized = normalize_input(input);
@@ -180,6 +182,27 @@ impl Store {
             return Err(StoreError::InvalidDesign(
                 "latest version is already reviewed".into(),
             ));
+        }
+        if approve {
+            let (kind,title,body,uri,stored_hash):(String,String,String,Option<String>,String)=tx.query_row(
+                "SELECT kind,title,body,uri,sha256 FROM design_artifacts WHERE project_id=?1 AND root_id=?2 AND version=?3",
+                params![project_id,root_id,latest],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
+            let current_hash = validate_and_hash(
+                &tx,
+                project_id,
+                &DesignArtifactInput {
+                    kind,
+                    title,
+                    body,
+                    uri,
+                    ..Default::default()
+                },
+            )?;
+            if current_hash != stored_hash {
+                return Err(StoreError::InvalidDesign(
+                    "artifact bytes changed since review submission".into(),
+                ));
+            }
         }
         let status = if approve {
             "approved"
@@ -471,6 +494,12 @@ mod tests {
             store.review_design_artifact("p", &first.root_id, 2, true, "", "agent:r", "agent"),
             Err(StoreError::ApprovalRequiresOwner)
         ));
+        fs::write(&screenshot, b"modified after submission").unwrap();
+        assert!(matches!(
+            store.review_design_artifact("p", &first.root_id, 2, true, "", "owner", "tampered"),
+            Err(StoreError::InvalidDesign(_))
+        ));
+        fs::write(&screenshot, b"screen two").unwrap();
         store
             .review_design_artifact(
                 "p",

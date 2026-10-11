@@ -1,6 +1,6 @@
 use super::discovery::insert_event;
 use super::runs::interrupt_project_on_scope_change;
-use super::{Result, Store, StoreError, validate_nonempty};
+use super::{Result, Store, StoreError, reject_sensitive_text, validate_nonempty};
 use pipeline_domain::{DependencyKind, PlanContent, TaskSpec};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::json;
@@ -116,6 +116,7 @@ impl Store {
         actor: &str,
         correlation_id: &str,
     ) -> Result<PlanRecord> {
+        reject_sensitive_text(&serde_json::to_string(content)?)?;
         for (field, value) in [
             ("id", id),
             ("actor", actor),

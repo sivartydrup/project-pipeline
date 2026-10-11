@@ -1,10 +1,11 @@
 use super::discovery::insert_event;
-use super::{Result, Store, StoreError, validate_nonempty};
+use super::{Result, Store, StoreError, reject_sensitive_text, validate_nonempty};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::fs;
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 use uuid::Uuid;
 
@@ -71,6 +72,7 @@ impl Store {
                 "invalid release artifact kind".into(),
             ));
         }
+        reject_sensitive_text(&path.to_string_lossy())?;
         let project = self
             .get_project(project_id)?
             .ok_or_else(|| StoreError::NotFound(project_id.into()))?;
@@ -83,8 +85,7 @@ impl Store {
                 "artifact must be a file inside project root".into(),
             ));
         }
-        let bytes = fs::read(&file).map_err(|e| StoreError::InvalidRelease(e.to_string()))?;
-        let digest = format!("{:x}", Sha256::digest(&bytes));
+        let digest = sha256_file(&file)?;
         let id = Uuid::new_v4().to_string();
         let tx = self.connection.transaction()?;
         tx.execute(
@@ -148,6 +149,7 @@ impl Store {
             ("correlation_id", correlation_id),
         ] {
             validate_nonempty(field, value)?;
+            reject_sensitive_text(value)?;
         }
         if !matches!(git_commit.len(), 40 | 64)
             || !git_commit.bytes().all(|b| b.is_ascii_hexdigit())
@@ -189,6 +191,7 @@ impl Store {
         correlation_id: &str,
     ) -> Result<ReleaseRecord> {
         validate_nonempty("platform", platform)?;
+        reject_sensitive_text(platform)?;
         let tx = self.connection.transaction()?;
         require_draft(&tx, project_id, id, expected_revision)?;
         let artifact: Option<(String, Option<String>)> = tx
@@ -246,6 +249,7 @@ impl Store {
         correlation_id: &str,
     ) -> Result<ReleaseRecord> {
         validate_nonempty("check name", name)?;
+        reject_sensitive_text(name)?;
         if !matches!(status, "pending" | "passed" | "failed") {
             return Err(StoreError::InvalidRelease("invalid check status".into()));
         }
@@ -257,14 +261,21 @@ impl Store {
         let tx = self.connection.transaction()?;
         require_draft(&tx, project_id, id, expected_revision)?;
         if let Some(artifact_id) = evidence_artifact_id {
-            let exists: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM artifacts WHERE id=?1 AND project_id=?2)",
-                params![artifact_id, project_id],
+            let commit: String = tx.query_row(
+                "SELECT git_commit FROM release_candidates WHERE id=?1",
+                [id],
                 |r| r.get(0),
             )?;
-            if !exists {
+            let linked_commit: Option<Option<String>> = tx
+                .query_row(
+                    "SELECT git_commit FROM artifacts WHERE id=?1 AND project_id=?2",
+                    params![artifact_id, project_id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if linked_commit.flatten().as_deref() != Some(commit.as_str()) {
                 return Err(StoreError::InvalidRelease(
-                    "check evidence must belong to project".into(),
+                    "check evidence must belong to project and exact commit".into(),
                 ));
             }
         }
@@ -317,14 +328,7 @@ impl Store {
                 "build and passing required checks needed".into(),
             ));
         }
-        for build in &release.builds {
-            verify_artifact(&tx, project_id, &build.artifact_id)?;
-        }
-        for check in &release.checks {
-            if let Some(artifact_id) = &check.evidence_artifact_id {
-                verify_artifact(&tx, project_id, artifact_id)?;
-            }
-        }
+        verify_release_artifacts(&tx, &release)?;
         let hash = release_hash(&release)?;
         tx.execute("INSERT INTO approvals(id,project_id,subject_type,subject_id,subject_revision,subject_hash,
                     action_class,target,approver) VALUES (?1,?2,'release',?3,?4,?5,'release.approve',?6,?7)",
@@ -371,10 +375,11 @@ impl Store {
                 "candidate must be approved first".into(),
             ));
         }
+        verify_release_artifacts(&tx, &release)?;
         let approval_id = Uuid::new_v4().to_string();
         let hash = release_hash(&release)?;
         tx.execute("INSERT INTO approvals(id,project_id,subject_type,subject_id,subject_revision,subject_hash,
-                    action_class,target,approver) VALUES (?1,?2,'release',?3,?4,?5,'release.execute',?6,?7)",
+                    action_class,target,approver,expires_at) VALUES (?1,?2,'release',?3,?4,?5,'release.execute',?6,?7,datetime('now','+24 hours'))",
             params![approval_id,project_id,id,expected_revision,hash,release.target,actor])?;
         insert_event(
             &tx,
@@ -418,6 +423,7 @@ impl Store {
             ));
         }
         validate_nonempty("deployment notes", notes)?;
+        reject_sensitive_text(notes)?;
         let tx = self.connection.transaction()?;
         let release = release_from(&tx, project_id, id)?;
         if release.revision != expected_revision {
@@ -432,11 +438,13 @@ impl Store {
                 "candidate must be approved first".into(),
             ));
         }
+        verify_release_artifacts(&tx, &release)?;
         let hash = release_hash(&release)?;
         let valid: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM approvals WHERE id=?1 AND project_id=?2
             AND subject_type='release' AND subject_id=?3 AND subject_revision=?4 AND subject_hash=?5
-            AND action_class='release.execute' AND target=?6 AND revoked_at IS NULL)",
+            AND action_class='release.execute' AND target=?6 AND revoked_at IS NULL
+            AND expires_at IS NOT NULL AND datetime(expires_at)>CURRENT_TIMESTAMP)",
             params![
                 approval_id,
                 project_id,
@@ -503,6 +511,7 @@ impl Store {
             ));
         }
         validate_nonempty("smoke notes", notes)?;
+        reject_sensitive_text(notes)?;
         let tx = self.connection.transaction()?;
         let release = release_from(&tx, project_id, id)?;
         if release.revision != expected_revision {
@@ -583,12 +592,55 @@ fn verify_artifact(c: &Connection, project_id: &str, id: &str) -> Result<()> {
         params![id, project_id],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
-    let bytes = fs::read(&uri)
+    let project_root: String =
+        c.query_row("SELECT path FROM projects WHERE id=?1", [project_id], |r| {
+            r.get(0)
+        })?;
+    let root = dunce::canonicalize(&project_root)
+        .map_err(|_| StoreError::InvalidRelease("project root unavailable".into()))?;
+    let file = dunce::canonicalize(&uri)
         .map_err(|_| StoreError::InvalidRelease("release evidence is unreadable".into()))?;
-    if format!("{:x}", Sha256::digest(bytes)) != digest {
+    if !file.starts_with(&root) || !file.is_file() {
+        return Err(StoreError::InvalidRelease(
+            "release evidence escaped project root".into(),
+        ));
+    }
+    if sha256_file(&file)? != digest {
         return Err(StoreError::InvalidRelease(
             "release evidence hash changed".into(),
         ));
+    }
+    Ok(())
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    let mut file = File::open(path).map_err(|e| StoreError::InvalidRelease(e.to_string()))?;
+    let mut digest = Sha256::new();
+    let mut block = [0_u8; 8192];
+    loop {
+        let count = file
+            .read(&mut block)
+            .map_err(|e| StoreError::InvalidRelease(e.to_string()))?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&block[..count]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+pub(crate) fn verify_linked_artifact(c: &Connection, project_id: &str, id: &str) -> Result<()> {
+    verify_artifact(c, project_id, id)
+}
+
+fn verify_release_artifacts(c: &Connection, r: &ReleaseRecord) -> Result<()> {
+    for build in &r.builds {
+        verify_artifact(c, &r.project_id, &build.artifact_id)?;
+    }
+    for check in &r.checks {
+        if let Some(id) = &check.evidence_artifact_id {
+            verify_artifact(c, &r.project_id, id)?;
+        }
     }
     Ok(())
 }
@@ -639,6 +691,7 @@ fn release_from(c: &Connection, project_id: &str, id: &str) -> Result<ReleaseRec
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn fixture() -> (Store, String, tempfile::TempDir) {
         let folder = tempfile::tempdir().unwrap();
@@ -762,7 +815,7 @@ mod tests {
 
     #[test]
     fn deployment_requires_separate_exact_target_one_use_approval() {
-        let (mut store, commit, _folder) = fixture();
+        let (mut store, commit, folder) = fixture();
         let mut r = store
             .create_release(
                 "p",
@@ -812,9 +865,60 @@ mod tests {
             store.approve_release_execution("p", &r.id, r.revision, "agent", "agent"),
             Err(StoreError::ApprovalRequiresOwner)
         ));
+        fs::write(folder.path().join("build.exe"), b"tampered").unwrap();
+        assert!(matches!(
+            store.approve_release_execution("p", &r.id, r.revision, "owner", "tampered"),
+            Err(StoreError::InvalidRelease(_))
+        ));
+        fs::write(folder.path().join("build.exe"), b"binary").unwrap();
         let approval = store
             .approve_release_execution("p", &r.id, r.revision, "owner", "execution")
             .unwrap();
+        store
+            .connection
+            .execute(
+                "UPDATE approvals SET expires_at='2000-01-01 00:00:00' WHERE id=?1",
+                [&approval],
+            )
+            .unwrap();
+        assert!(
+            store
+                .record_manual_deployment(
+                    "p",
+                    &r.id,
+                    r.revision,
+                    &approval,
+                    "succeeded",
+                    "passed",
+                    "manual deploy",
+                    "owner",
+                    "expired"
+                )
+                .is_err()
+        );
+        store
+            .connection
+            .execute(
+                "UPDATE approvals SET expires_at=datetime('now','+24 hours') WHERE id=?1",
+                [&approval],
+            )
+            .unwrap();
+        fs::write(folder.path().join("check.log"), b"tampered").unwrap();
+        assert!(matches!(
+            store.record_manual_deployment(
+                "p",
+                &r.id,
+                r.revision,
+                &approval,
+                "succeeded",
+                "passed",
+                "manual deploy",
+                "owner",
+                "tampered-deploy"
+            ),
+            Err(StoreError::InvalidRelease(_))
+        ));
+        fs::write(folder.path().join("check.log"), b"passing checks").unwrap();
         store
             .connection
             .execute(

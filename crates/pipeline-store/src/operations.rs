@@ -1,5 +1,5 @@
 use super::discovery::insert_event;
-use super::{Result, Store, StoreError, validate_nonempty};
+use super::{Result, Store, StoreError, reject_sensitive_text, validate_nonempty};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -193,12 +193,15 @@ impl Store {
                 "publishable content and exact target required".into(),
             ));
         }
+        if let Some(artifact_id) = record.input.artifact_id.as_deref() {
+            super::release::verify_linked_artifact(&tx, project_id, artifact_id)?;
+        }
         let approval_id = Uuid::new_v4().to_string();
         let hash = content_hash(&record)?;
         tx.execute(
             "INSERT INTO approvals(id,project_id,subject_type,subject_id,subject_revision,
-            subject_hash,action_class,target,approver)
-            VALUES (?1,?2,'lifecycle',?3,?4,?5,'external.publish',?6,?7)",
+            subject_hash,action_class,target,approver,expires_at)
+            VALUES (?1,?2,'lifecycle',?3,?4,?5,'external.publish',?6,?7,datetime('now','+24 hours'))",
             params![
                 approval_id,
                 project_id,
@@ -242,10 +245,14 @@ impl Store {
         if record.input.status == "published" {
             return Err(StoreError::InvalidLifecycle("already published".into()));
         }
+        if let Some(artifact_id) = record.input.artifact_id.as_deref() {
+            super::release::verify_linked_artifact(&tx, project_id, artifact_id)?;
+        }
         let hash = content_hash(&record)?;
         let valid:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM approvals WHERE id=?1 AND project_id=?2
             AND subject_type='lifecycle' AND subject_id=?3 AND subject_revision=?4 AND subject_hash=?5
-            AND action_class='external.publish' AND target=?6 AND revoked_at IS NULL)",
+            AND action_class='external.publish' AND target=?6 AND revoked_at IS NULL
+            AND expires_at IS NOT NULL AND datetime(expires_at)>CURRENT_TIMESTAMP)",
             params![approval_id,project_id,id,expected_revision,hash,record.input.publication_target],|r|r.get(0))?;
         let used: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM lifecycle_entries WHERE publication_approval_id=?1)",
@@ -304,6 +311,7 @@ impl Store {
 }
 
 fn validate_input(i: &LifecycleInput) -> Result<()> {
+    reject_sensitive_text(&serde_json::to_string(i)?)?;
     if !KINDS.contains(&i.kind.as_str()) {
         return Err(StoreError::InvalidLifecycle("invalid kind".into()));
     }
@@ -440,6 +448,22 @@ mod tests {
         let approval = s
             .approve_publication("p", &r.id, r.revision, "owner", "approve2")
             .unwrap();
+        s.connection
+            .execute(
+                "UPDATE approvals SET expires_at='2000-01-01 00:00:00' WHERE id=?1",
+                [&approval],
+            )
+            .unwrap();
+        assert!(
+            s.record_manual_publication("p", &r.id, r.revision, &approval, "owner", "expired")
+                .is_err()
+        );
+        s.connection
+            .execute(
+                "UPDATE approvals SET expires_at=datetime('now','+24 hours') WHERE id=?1",
+                [&approval],
+            )
+            .unwrap();
         r = s
             .record_manual_publication("p", &r.id, r.revision, &approval, "owner", "published")
             .unwrap();
@@ -448,6 +472,50 @@ mod tests {
             s.record_manual_publication("p", &r.id, r.revision, &approval, "owner", "replay")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn publication_rechecks_linked_asset_bytes() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("asset.png");
+        std::fs::write(&file, b"original").unwrap();
+        let mut s = Store::open_in_memory().unwrap();
+        s.create_project(
+            "p",
+            "Project",
+            folder.path().to_str().unwrap(),
+            "owner",
+            "p",
+        )
+        .unwrap();
+        let artifact = s
+            .attach_release_artifact("p", &file, "launch-asset", None, "owner", "asset")
+            .unwrap();
+        let mut input = input("launch_asset");
+        input.artifact_id = Some(artifact);
+        input.publication_target = "example.com".into();
+        let record = s.create_lifecycle("p", &input, "owner", "create").unwrap();
+        std::fs::write(&file, b"changed").unwrap();
+        assert!(matches!(
+            s.approve_publication("p", &record.id, record.revision, "owner", "tampered"),
+            Err(StoreError::InvalidRelease(_))
+        ));
+        std::fs::write(&file, b"original").unwrap();
+        let approval = s
+            .approve_publication("p", &record.id, record.revision, "owner", "approved")
+            .unwrap();
+        std::fs::write(&file, b"changed again").unwrap();
+        assert!(matches!(
+            s.record_manual_publication(
+                "p",
+                &record.id,
+                record.revision,
+                &approval,
+                "owner",
+                "tampered-publish"
+            ),
+            Err(StoreError::InvalidRelease(_))
+        ));
     }
 
     #[test]

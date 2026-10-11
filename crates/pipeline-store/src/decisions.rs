@@ -1,5 +1,5 @@
 use super::discovery::insert_event;
-use super::{Result, Store, StoreError, validate_nonempty};
+use super::{Result, Store, StoreError, reject_sensitive_text, validate_nonempty};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -514,6 +514,7 @@ impl Store {
 }
 
 fn validate_decision(input: &DecisionInput) -> Result<()> {
+    reject_sensitive_text(&serde_json::to_string(input)?)?;
     validate_nonempty("question", &input.question)?;
     validate_nonempty("impact", &input.impact)?;
     validate_nonempty("rationale", &input.rationale)?;

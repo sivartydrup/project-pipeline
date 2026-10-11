@@ -1,4 +1,4 @@
-use super::{Result, Store, StoreError, validate_nonempty};
+use super::{Result, Store, StoreError, reject_sensitive_text, validate_nonempty};
 use pipeline_domain::BriefContent;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::json;
@@ -100,6 +100,7 @@ impl Store {
         actor: &str,
         correlation_id: &str,
     ) -> Result<BriefRecord> {
+        reject_sensitive_text(&serde_json::to_string(content)?)?;
         for (field, value) in [
             ("id", id),
             ("actor", actor),
@@ -267,6 +268,16 @@ impl Store {
         actor: &str,
         correlation_id: &str,
     ) -> Result<ResearchRecord> {
+        for value in [
+            &input.claim,
+            &input.summary,
+            &input.relevance,
+            &input.source_uri,
+            &input.accessed_at,
+            &input.confidence,
+        ] {
+            reject_sensitive_text(value)?;
+        }
         for (field, value) in [
             ("id", id),
             ("claim", &input.claim),

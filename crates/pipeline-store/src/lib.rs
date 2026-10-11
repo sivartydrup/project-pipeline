@@ -163,6 +163,8 @@ pub enum StoreError {
     InvalidRelease(String),
     #[error("invalid lifecycle record: {0}")]
     InvalidLifecycle(String),
+    #[error("credential-shaped content is not allowed in project records")]
+    SensitiveContent,
     #[error("invalid design artifact: {0}")]
     InvalidDesign(String),
 }
@@ -444,8 +446,54 @@ fn validate_nonempty(field: &'static str, value: &str) -> Result<()> {
     if value.trim().is_empty() {
         Err(StoreError::EmptyField(field))
     } else {
-        Ok(())
+        reject_sensitive_text(value)
     }
+}
+
+fn reject_sensitive_text(text: &str) -> Result<()> {
+    let lower = text.to_ascii_lowercase();
+    let compact = lower.replace(['"', '\'', ' ', '\\', '\n', '\r', '\t'], "");
+    if [
+        "password:",
+        "password=",
+        "api_key:",
+        "api_key=",
+        "api-key:",
+        "api-key=",
+        "apikey:",
+        "apikey=",
+        "secret:",
+        "secret=",
+        "token:",
+        "token=",
+        "authorization:",
+        "authorization=",
+        "private_key:",
+        "private_key=",
+        "-----beginprivatekey-----",
+    ]
+    .iter()
+    .any(|marker| compact.contains(marker))
+    {
+        return Err(StoreError::SensitiveContent);
+    }
+    for marker in ["sk-", "ghp_"] {
+        for (index, _) in lower.match_indices(marker) {
+            let tail = &lower[index + marker.len()..];
+            if tail
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+                .count()
+                >= 12
+            {
+                return Err(StoreError::SensitiveContent);
+            }
+        }
+    }
+    if lower.contains("bearer ") {
+        return Err(StoreError::SensitiveContent);
+    }
+    Ok(())
 }
 
 fn redact_export_text(column: &str, text: &str) -> Value {
@@ -644,6 +692,121 @@ fn apply_migration(connection: &mut Connection, version: i64, sql: &str) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credential_guard_rejects_obvious_secrets_without_blocking_normal_copy() {
+        for value in [
+            "password=abc123",
+            "Bearer abcdefghijkl",
+            "sk-1234567890abcdef",
+            r#"{"api_key":"abc123"}"#,
+            "-----BEGIN PRIVATE KEY-----",
+        ] {
+            assert!(
+                matches!(
+                    reject_sensitive_text(value),
+                    Err(StoreError::SensitiveContent)
+                ),
+                "{value}"
+            );
+        }
+        for value in [
+            "Passwordless login flow",
+            "Risk-based review",
+            "API key management",
+            "Token budget",
+        ] {
+            reject_sensitive_text(value).unwrap();
+        }
+    }
+
+    #[test]
+    fn workflow_services_reject_obvious_credentials_before_persistence() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut store = Store::open_in_memory().unwrap();
+        assert!(matches!(
+            store.create_project(
+                "bad",
+                "password=abc",
+                folder.path().to_str().unwrap(),
+                "owner",
+                "bad"
+            ),
+            Err(StoreError::SensitiveContent)
+        ));
+        store
+            .create_project(
+                "p",
+                "Project",
+                folder.path().to_str().unwrap(),
+                "owner",
+                "create",
+            )
+            .unwrap();
+        let brief = pipeline_domain::BriefContent {
+            idea: "password=abc".into(),
+            ..Default::default()
+        };
+        assert!(matches!(
+            store.save_brief_revision("b", "p", 0, &brief, "owner", "brief"),
+            Err(StoreError::SensitiveContent)
+        ));
+        let plan = pipeline_domain::PlanContent {
+            epics: vec![pipeline_domain::EpicSpec {
+                id: "e".into(),
+                title: "API key: abc".into(),
+                outcome: "Done".into(),
+            }],
+            ..Default::default()
+        };
+        assert!(matches!(
+            store.save_plan_revision("plan", "p", 0, &plan, "owner", "plan"),
+            Err(StoreError::SensitiveContent)
+        ));
+        let decision = DecisionInput {
+            question: "password=abc".into(),
+            ..Default::default()
+        };
+        assert!(matches!(
+            store.create_decision("d", "p", &decision, "owner", "decision"),
+            Err(StoreError::SensitiveContent)
+        ));
+        assert!(matches!(
+            store.create_release(
+                "p",
+                "1.0",
+                &"a".repeat(40),
+                "production",
+                "token=abc",
+                "owner",
+                "release"
+            ),
+            Err(StoreError::SensitiveContent)
+        ));
+        let lifecycle = LifecycleInput {
+            kind: "feedback".into(),
+            title: "Feedback".into(),
+            body: "secret=abc".into(),
+            status: "open".into(),
+            severity: "low".into(),
+            ..Default::default()
+        };
+        assert!(matches!(
+            store.create_lifecycle("p", &lifecycle, "owner", "lifecycle"),
+            Err(StoreError::SensitiveContent)
+        ));
+        let design = DesignArtifactInput {
+            kind: "copy".into(),
+            title: "Copy".into(),
+            body: "password=abc".into(),
+            ..Default::default()
+        };
+        assert!(matches!(
+            store.create_design_artifact("p", &design, "owner", "design"),
+            Err(StoreError::SensitiveContent)
+        ));
+        assert_eq!(store.activity_count("p").unwrap(), 1);
+    }
 
     #[test]
     fn project_changes_are_atomic_and_revision_checked() {
