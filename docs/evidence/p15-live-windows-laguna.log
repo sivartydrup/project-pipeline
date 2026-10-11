@@ -1,0 +1,600 @@
+run started: a7a89519-d396-4a8d-bd1d-754710f285a4
+event: Progress: agent_start
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: agent_start
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: I
+event: Progress: 'll
+event: Progress:  start
+event: Progress:  by
+event: Progress:  getting
+event: Progress:  the
+event: Progress:  task
+event: Progress:  details
+event: Progress:  via
+event: Progress:  the
+event: Progress:  bridge
+event: Progress: .
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: cb836711-1b1c-4daa-8c3b-b1b8c844f34f: Pi requests bash: Write-Output '{"expected_revision":0,"operation":"task.get","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"a7a89519-d396-4a8d-bd1d-754710f285a4",
+event: PermissionRequest: Pi requests bash: Write-Output '{"expected_revision":0,"operation":"task.get","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"a7a89519-d396-4a8d-bd1d-754710f285a4",
+permission resolved: cb836711-1b1c-4daa-8c3b-b1b8c844f34f
+event: Pi permission cb836711-1b1c-4daa-8c3b-b1b8c844f34f: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: agent_start
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: The
+event: Progress:  task
+event: Progress:  indicates
+event: Progress:  PowerShell
+event: Progress:  is
+event: Progress:  the
+event: Progress:  shell
+event: Progress: .
+event: Progress:  Let
+event: Progress:  me
+event: Progress:  use
+event: Progress:  the
+event: Progress:  powers
+event: Progress: hell
+event: Progress:  tool
+event: Progress:  instead
+event: Progress: .
+event: Progress: message_end
+event: Tool: Pi powershell proposed
+permission pending: 2768dbb2-469e-4e41-be0d-cf71f706ff7b: Pi requests powershell: Write-Output '{"expected_revision":0,"operation":"task.get","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"a7a89519-d396-4a8d-bd1d-754710f285a4",
+event: PermissionRequest: Pi requests powershell: Write-Output '{"expected_revision":0,"operation":"task.get","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"a7a89519-d396-4a8d-bd1d-754710f285a4",
+permission resolved: 2768dbb2-469e-4e41-be0d-cf71f706ff7b
+event: Pi permission 2768dbb2-469e-4e41-be0d-cf71f706ff7b: AllowedOnce
+event: Tool: Pi powershell finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: agent_start
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: Task
+event: Progress:  retrieved
+event: Progress: :
+event: Progress:  revision
+event: Progress:  is
+event: Progress:  
+event: Progress: 1
+event: Progress: 1
+event: Progress: .
+event: Progress:  Now
+event: Progress:  let
+event: Progress:  me
+event: Progress:  inspect
+event: Progress:  the
+event: Progress:  checkout
+event: Progress:  files
+event: Progress: .
+event: Progress: message_end
+event: Tool: Pi read proposed
+event: PermissionRequest: Pi requests read: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d/
+event: Tool: Pi read finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: agent_start
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: agent_start
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: agent_start
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: c7f04c65-a289-4f27-9fbf-10ffa34465a8: Pi requests bash: ls -la "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d/"
+event: PermissionRequest: Pi requests bash: ls -la "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d/"
+permission resolved: c7f04c65-a289-4f27-9fbf-10ffa34465a8
+event: Pi permission c7f04c65-a289-4f27-9fbf-10ffa34465a8: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: agent_start
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: 650ebfc1-f3ca-496c-a7d2-7d7349209c19: Pi requests bash: ls -la "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d/src/"
+event: PermissionRequest: Pi requests bash: ls -la "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d/src/"
+permission resolved: 650ebfc1-f3ca-496c-a7d2-7d7349209c19
+event: Pi permission 650ebfc1-f3ca-496c-a7d2-7d7349209c19: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi read proposed
+event: PermissionRequest: Pi requests read: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d/Cargo.toml
+event: Tool: Pi read proposed
+event: PermissionRequest: Pi requests read: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d/.gitignore
+event: Tool: Pi read proposed
+event: PermissionRequest: Pi requests read: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d/src/lib.rs
+event: Tool: Pi read proposed
+event: PermissionRequest: Pi requests read: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d/.git
+event: Tool: Pi read finished
+event: Tool: Pi read finished
+event: Tool: Pi read finished
+event: Tool: Pi read finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: The
+event: Progress:  bug
+event: Progress:  is
+event: Progress:  clear
+event: Progress: :
+event: Progress:  `
+event: Progress: add
+event: Progress: `
+event: Progress:  computes
+event: Progress:  `
+event: Progress: a
+event: Progress:  -
+event: Progress:  b
+event: Progress: `
+event: Progress:  instead
+event: Progress:  of
+event: Progress:  `
+event: Progress: a
+event: Progress:  +
+event: Progress:  b
+event: Progress: `.
+event: Progress:  Let
+event: Progress:  me
+event: Progress:  fix
+event: Progress:  it
+event: Progress: .
+event: Progress: message_end
+event: Tool: Pi edit proposed
+event: Tool: Pi edit finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: agent_start
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi edit proposed
+event: Tool: Pi edit finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: The
+event: Progress:  edit
+event: Progress:  tool
+event: Progress:  is
+event: Progress:  having
+event: Progress:  trouble
+event: Progress:  with
+event: Progress:  multi
+event: Progress: -line
+event: Progress:  strings
+event: Progress: .
+event: Progress:  Let
+event: Progress:  me
+event: Progress:  write
+event: Progress:  the
+event: Progress:  whole
+event: Progress:  file
+event: Progress:  since
+event: Progress:  it
+event: Progress: 's
+event: Progress:  small
+event: Progress: .
+event: Progress: message_end
+event: Tool: Pi write proposed
+event: PermissionRequest: Pi requests write: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d/src/lib.rs
+event: Tool: Pi write finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: I
+event: Progress:  need
+event: Progress:  to
+event: Progress:  keep
+event: Progress:  the
+event: Progress:  test
+event: Progress:  code
+event: Progress: .
+event: Progress:  Let
+event: Progress:  me
+event: Progress:  rewrite
+event: Progress:  the
+event: Progress:  file
+event: Progress:  preserving
+event: Progress:  tests
+event: Progress: .
+event: Progress: message_end
+event: Tool: Pi write proposed
+event: PermissionRequest: Pi requests write: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d/src/lib.rs
+event: Tool: Pi write finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi read proposed
+event: PermissionRequest: Pi requests read: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d/src/lib.rs
+event: Tool: Pi read finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: Now
+event: Progress:  let
+event: Progress:  me
+event: Progress:  run
+event: Progress:  the
+event: Progress:  actual
+event: Progress:  test
+event: Progress:  with
+event: Progress:  output
+event: Progress:  redirected
+event: Progress:  to
+event: Progress:  test
+event: Progress: -log
+event: Progress: .txt
+event: Progress:  inside
+event: Progress:  the
+event: Progress:  checkout
+event: Progress: .
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: e8a2b0b8-0ee1-4294-abbb-b302f6b96b70: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d" && cargo test 2>&1 > test-log.txt; echo "
+event: PermissionRequest: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d" && cargo test 2>&1 > test-log.txt; echo "
+permission resolved: e8a2b0b8-0ee1-4294-abbb-b302f6b96b70
+event: Pi permission e8a2b0b8-0ee1-4294-abbb-b302f6b96b70: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: Test
+event: Progress:  ran
+event: Progress:  with
+event: Progress:  exit
+event: Progress:  code
+event: Progress:  
+event: Progress: 0
+event: Progress: .
+event: Progress:  Let
+event: Progress:  me
+event: Progress:  verify
+event: Progress:  the
+event: Progress:  log
+event: Progress:  content
+event: Progress: .
+event: Progress: message_end
+event: Tool: Pi read proposed
+event: PermissionRequest: Pi requests read: C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d/test-log.txt
+event: Tool: Pi read finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: The
+event: Progress:  test
+event: Progress:  passes
+event: Progress: .
+event: Progress:  Now
+event: Progress:  I
+event: Progress:  need
+event: Progress:  to
+event: Progress:  compute
+event: Progress:  the
+event: Progress:  SHA
+event: Progress: -
+event: Progress: 2
+event: Progress: 5
+event: Progress: 6
+event: Progress:  of
+event: Progress:  the
+event: Progress:  test
+event: Progress: -log
+event: Progress: .txt
+event: Progress:  file
+event: Progress:  (
+event: Progress: lowercase
+event: Progress: )
+event: Progress:  to
+event: Progress:  attach
+event: Progress:  the
+event: Progress:  artifact
+event: Progress: .
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: a2581469-8d34-43a1-98b3-a05fcdbc8081: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d" && get-filehash -algorithm sha256 -path t
+event: PermissionRequest: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d" && get-filehash -algorithm sha256 -path t
+permission resolved: a2581469-8d34-43a1-98b3-a05fcdbc8081
+event: Pi permission a2581469-8d34-43a1-98b3-a05fcdbc8081: Denied
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Tool: Pi bash proposed
+permission pending: af1c3c01-a49e-4fa2-a87c-df6e81f7f267: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d" && sha256sum test-log.txt | cut -d' ' -f1
+event: PermissionRequest: Pi requests bash: cd "C:/Users/User/AppData/Local/Temp/project-pipeline-worktrees/d979dac2a1d7144a/302910ab-1640-462a-9bc1-585ce0c7e50d" && sha256sum test-log.txt | cut -d' ' -f1
+permission resolved: af1c3c01-a49e-4fa2-a87c-df6e81f7f267
+event: Pi permission af1c3c01-a49e-4fa2-a87c-df6e81f7f267: AllowedOnce
+event: Tool: Pi bash finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: agent_start
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: SHA
+event: Progress: -
+event: Progress: 2
+event: Progress: 5
+event: Progress: 6
+event: Progress:  (
+event: Progress: lowercase
+event: Progress: ):
+event: Progress:  `
+event: Progress: 7
+event: Progress: 9
+event: Progress: c
+event: Progress: 9
+event: Progress: 5
+event: Progress: 7
+event: Progress: 6
+event: Progress: e
+event: Progress: 3
+event: Progress: 2
+event: Progress: ddb
+event: Progress: 8
+event: Progress: 9
+event: Progress: a
+event: Progress: 6
+event: Progress: ec
+event: Progress: 8
+event: Progress: e
+event: Progress: 2
+event: Progress: f
+event: Progress: 4
+event: Progress: ab
+event: Progress: 9
+event: Progress: cc
+event: Progress: 3
+event: Progress: ea
+event: Progress: 5
+event: Progress: f
+event: Progress: 8
+event: Progress: 1
+event: Progress: 6
+event: Progress: cd
+event: Progress: 7
+event: Progress: 8
+event: Progress: bc
+event: Progress: 3
+event: Progress: 9
+event: Progress: 2
+event: Progress: 2
+event: Progress: 5
+event: Progress: 2
+event: Progress: 5
+event: Progress: ea
+event: Progress: 4
+event: Progress: 5
+event: Progress: 9
+event: Progress: 2
+event: Progress: 2
+event: Progress: 1
+event: Progress: b
+event: Progress: 5
+event: Progress: 7
+event: Progress: 5
+event: Progress: db
+event: Progress: `.
+event: Progress:  Now
+event: Progress:  let
+event: Progress:  me
+event: Progress:  attach
+event: Progress:  the
+event: Progress:  test
+event: Progress: -log
+event: Progress:  artifact
+event: Progress:  (
+event: Progress: using
+event: Progress:  expected
+event: Progress: _revision
+event: Progress:  
+event: Progress: 1
+event: Progress: 1
+event: Progress:  from
+event: Progress:  the
+event: Progress:  task
+event: Progress: .get
+event: Progress:  RESULT
+event: Progress: .re
+event: Progress: vision
+event: Progress: ).
+event: Progress: message_end
+event: Tool: Pi powershell proposed
+permission pending: c34c6e99-2363-47e8-95e6-9f050e2f655a: Pi requests powershell: $idempotency_key = "attach-test-log-" + [System.Guid]::NewGuid().ToString(); Write-Output "{""expected_revision"":11,""operation"":""artifact.attach"",""project
+event: PermissionRequest: Pi requests powershell: $idempotency_key = "attach-test-log-" + [System.Guid]::NewGuid().ToString(); Write-Output "{""expected_revision"":11,""operation"":""artifact.attach"",""project
+permission resolved: c34c6e99-2363-47e8-95e6-9f050e2f655a
+event: Pi permission c34c6e99-2363-47e8-95e6-9f050e2f655a: AllowedOnce
+event: Tool: Pi powershell finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: Artifact
+event: Progress:  attached
+event: Progress:  with
+event: Progress:  ID
+event: Progress:  `
+event: Progress: 6
+event: Progress: 0
+event: Progress: 0
+event: Progress: d
+event: Progress: 1
+event: Progress: cca
+event: Progress: -
+event: Progress: 5
+event: Progress: a
+event: Progress: 6
+event: Progress: e
+event: Progress: -
+event: Progress: 4
+event: Progress: 8
+event: Progress: 9
+event: Progress: a
+event: Progress: -
+event: Progress: 9
+event: Progress: d
+event: Progress: 3
+event: Progress: 2
+event: Progress: -bd
+event: Progress: 2
+event: Progress: 7
+event: Progress: b
+event: Progress: 9
+event: Progress: f
+event: Progress: 7
+event: Progress: ac
+event: Progress: fd
+event: Progress: `.
+event: Progress:  Now
+event: Progress:  let
+event: Progress:  me
+event: Progress:  refresh
+event: Progress:  task
+event: Progress: .get
+event: Progress:  to
+event: Progress:  get
+event: Progress:  the
+event: Progress:  latest
+event: Progress:  revision
+event: Progress:  before
+event: Progress:  the
+event: Progress:  next
+event: Progress:  mutation
+event: Progress: .
+event: Progress: message_end
+event: Tool: Pi powershell proposed
+permission pending: 6244f238-5d68-4a3e-a1f2-325624b5f01e: Pi requests powershell: Write-Output '{"expected_revision":11,"operation":"task.get","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"a7a89519-d396-4a8d-bd1d-754710f285a4"
+event: PermissionRequest: Pi requests powershell: Write-Output '{"expected_revision":11,"operation":"task.get","project_id":"d628d859-1ade-458f-98fc-395aa99bd264","run_id":"a7a89519-d396-4a8d-bd1d-754710f285a4"
+permission resolved: 6244f238-5d68-4a3e-a1f2-325624b5f01e
+event: Pi permission 6244f238-5d68-4a3e-a1f2-325624b5f01e: AllowedOnce
+event: Tool: Pi powershell finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: agent_start
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: Revision
+event: Progress:  is
+event: Progress:  still
+event: Progress:  
+event: Progress: 1
+event: Progress: 1
+event: Progress: .
+event: Progress:  Now
+event: Progress:  let
+event: Progress:  me
+event: Progress:  record
+event: Progress:  the
+event: Progress:  test
+event: Progress:  result
+event: Progress:  using
+event: Progress:  the
+event: Progress:  log
+event: Progress: _
+event: Progress: artifact
+event: Progress: _id
+event: Progress: .
+event: Progress: message_end
+event: Tool: Pi powershell proposed
+permission pending: d3db6ba4-2ebc-457c-b24c-0217772cb8d6: Pi requests powershell: $idempotency_key = "test-record-" + [System.Guid]::NewGuid().ToString(); Write-Output "{""expected_revision"":11,""operation"":""test.record"",""project_id"":""
+event: PermissionRequest: Pi requests powershell: $idempotency_key = "test-record-" + [System.Guid]::NewGuid().ToString(); Write-Output "{""expected_revision"":11,""operation"":""test.record"",""project_id"":""
+permission resolved: d3db6ba4-2ebc-457c-b24c-0217772cb8d6
+event: Pi permission d3db6ba4-2ebc-457c-b24c-0217772cb8d6: AllowedOnce
+event: Tool: Pi powershell finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: I
+event: Progress:  need
+event: Progress:  to
+event: Progress:  include
+event: Progress:  `
+event: Progress: log
+event: Progress: _
+event: Progress: artifact
+event: Progress: _id
+event: Progress: `
+event: Progress:  in
+event: Progress:  the
+event: Progress:  payload
+event: Progress: .
+event: Progress:  Let
+event: Progress:  me
+event: Progress:  redo
+event: Progress: .
+event: Progress: message_end
+event: Tool: Pi powershell proposed
+permission pending: cb6dde54-4d2c-4ede-ba4f-68186722373a: Pi requests powershell: $idempotency_key = "test-record-" + [System.Guid]::NewGuid().ToString(); Write-Output "{""expected_revision"":11,""operation"":""test.record"",""project_id"":""
+event: PermissionRequest: Pi requests powershell: $idempotency_key = "test-record-" + [System.Guid]::NewGuid().ToString(); Write-Output "{""expected_revision"":11,""operation"":""test.record"",""project_id"":""
+permission resolved: cb6dde54-4d2c-4ede-ba4f-68186722373a
+event: Pi permission cb6dde54-4d2c-4ede-ba4f-68186722373a: AllowedOnce
+event: Tool: Pi powershell finished
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: turn_start
+event: Progress: message_start
+event: Progress: message_end
+event: Progress: agent_start
+event: Progress: turn_start
+Pi protocol or extension error: Pi model-call limit reached before provider request

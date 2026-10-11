@@ -1,6 +1,6 @@
 # P15 Windows Pi capability report
 
-Observed on 10 October 2026 with `@earendil-works/pi-coding-agent` CLI version `1.1.0` (`--version` returned `1.1.0`). The adapter rejects other versions before launch.
+Observed on 10–11 October 2026 with `@earendil-works/pi-coding-agent` CLI version `1.1.0` (`--version` returned `1.1.0`). The adapter rejects other versions before launch.
 
 | Capability | Reported | Evidence and limit |
 | --- | --- | --- |
@@ -13,4 +13,6 @@ Observed on 10 October 2026 with `@earendil-works/pi-coding-agent` CLI version `
 | Permission reply | Supported | Pi extension UI request pauses tool execution until exact project policy decision; no-inference deny/abort and live allow/deny observed. |
 | Diff | Host capture only | Pi does not provide a native diff capability; app captures tracked checkout diff for review. `can_diff=false`. |
 
-Windows `cargo test --workspace`, Clippy with warnings denied, and build logs are `p15-test.log`, `p15-clippy.log`, and `p15-build.log`. M1 Max task journey remains a pre-release check.
+The Windows [Nemotron run log](p15-live-windows-nemotron.log) demonstrates the full sample sequence: Pi repaired the checkout, passed `cargo test`, attached a hashed [test log](p15-nemotron-sample-test.log), recorded the test, submitted the task, and the app captured the [tracked diff](0c5c98e7-6068-4c41-9233-276844cc0c69.patch). The run is completed and the task awaits owner review. Earlier runs demonstrate fail-closed model-call and provider-error stops.
+
+Final Windows `cargo test --workspace`, Clippy with warnings denied, and build logs are `p15-final-test.log`, `p15-final-clippy.log`, and `p15-final-build.log`. M1 Max task journey remains a pre-release check.

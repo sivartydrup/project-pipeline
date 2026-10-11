@@ -496,7 +496,19 @@ pub fn normalize_pi_event(
             event.kind = EventKind::Error;
             event.summary = "Pi extension error".into();
         }
-        "auto_retry_end" if value["success"] == false => event.kind = EventKind::Error,
+        "auto_retry_end" if value["success"] == false => {
+            event.kind = EventKind::Error;
+            let status = value["finalError"]
+                .as_str()
+                .and_then(|error| error.split_once(':').map(|(prefix, _)| prefix))
+                .filter(|prefix| {
+                    prefix.len() == 3 && prefix.bytes().all(|byte| byte.is_ascii_digit())
+                });
+            event.summary = match status {
+                Some(status) => format!("Pi provider retries exhausted: HTTP {status}"),
+                None => "Pi provider retries exhausted".into(),
+            };
+        }
         "response" if value["success"] == false => event.kind = EventKind::Error,
         "response" => return None,
         _ => return None,
@@ -529,6 +541,19 @@ mod tests {
             )
             .is_some()
         );
+    }
+
+    #[test]
+    fn provider_retry_error_reports_status_without_response_body() {
+        let event = normalize_pi_event(
+            &json!({"type":"auto_retry_end","success":false,
+                "finalError":"429: provider response containing private details"}),
+            "session",
+            6,
+        )
+        .unwrap();
+        assert_eq!(event.kind, EventKind::Error);
+        assert_eq!(event.summary, "Pi provider retries exhausted: HTTP 429");
     }
 
     #[test]

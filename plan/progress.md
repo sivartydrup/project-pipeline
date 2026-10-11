@@ -1,6 +1,6 @@
 # Implementation progress
 
-Updated 10 October 2026. Task acceptance follows `plan/backlog.json`; an implementation note or passing compile does not by itself accept a task.
+Updated 11 October 2026. Task acceptance follows `plan/backlog.json`; an implementation note or passing compile does not by itself accept a task.
 
 | Task | State | Evidence / remaining work |
 | --- | --- | --- |
@@ -19,7 +19,7 @@ Updated 10 October 2026. Task acceptance follows `plan/backlog.json`; an impleme
 | P12 | Accepted for foundation | Owner acceptance in `docs/approval-p12-2026-10-09.md`; scheduler preflight, managed Git worktrees, run state machine, exact scoped policy requests, owner inbox actions, and startup recovery. Windows state, recovery, denial, migration, and workspace checks passed. Evidence: `docs/scheduler-build.md` and linked logs. |
 | P13 | Accepted for foundation | Owner acceptance in `docs/approval-p13-2026-10-10.md`; OpenCode 1.18.30 adapter, normalized event and permission mapping, explicit degraded states, session recovery, v7→v8 event receipts, protocol fixtures, and live Windows session and model-driven permission smoke passed. Evidence: `docs/opencode-adapter-build.md` and linked logs. |
 | P14 | Accepted for foundation | Owner acceptance in `docs/approval-p14-2026-10-10.md`; the verified-free-model Windows run completed with a tracked addition fix, passing test, hashed log and diff artifacts, agent submission, and desktop review display. The owner accepted the disposable sample task separately; the app showed 1/1 tasks accepted and 100% verified completion. Workspace tests, Clippy, and build pass. The M1 Max journey remains a pre-release check. 35/40 approved model calls used. Evidence: `docs/task-review-build.md`. |
-| P15 | In verification | Pi 1.1.0 RPC process, strict framing, persistent session, normalized events, exact tool policy gate, model-call cap, desktop selection, worker limits, and review capture implemented. Windows workspace checks and no-inference process/policy probes pass. A live run fixed and tested the disposable task but reached the model-call cap before a valid bridge submission; prompt revision and repeated one-use action fixes are now verified locally. End-to-end task completion and M1 Max release check remain. Evidence: `docs/pi-adapter-build.md`. |
+| P15 | Accepted for foundation | Pi 1.1.0 RPC process, strict framing, persistent session, normalized events, exact tool policy gate, model-call cap, desktop selection, worker limits, and review capture implemented. Windows protocol fixtures and no-inference process/policy probes pass. An approved live Windows run fixed the disposable source, attached a hashed passing test log, recorded the test, submitted through the scoped bridge, and captured the diff; the sample task awaits separate owner review. Windows workspace checks pass. The M1 Max task journey remains a pre-release check. Evidence: `docs/pi-adapter-build.md`. |
 | P16–P19 | Not started | Dependencies and gates in `plan/backlog.json`. P07 verification remains separate. |
 
 The MacBook Pro M1 Max is not yet available. Native macOS checks remain release requirements and do not block Windows foundation work.
