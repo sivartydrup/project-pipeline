@@ -1,5 +1,21 @@
 # UX design decision records · proposed
 
+## UX-D08 · UX04 conversational boundary and spending gate
+
+**Status:** Owner approved isolated, tool-free live chat architecture on 12
+October 2026; implementation choice is in PR review. **Decision:** Keep the
+assistant separate from OpenCode and Pi task-run adapters. Require explicit
+provider/model/endpoint configuration and Send. Allow loopback inference
+endpoints; keep remote paid requests closed until a provider-specific,
+verifiable spending cap can be enforced. **Alternative:** Reuse task-run
+sessions with prompt-only restrictions. **Reason:** Existing task adapters
+grant checkout, write bridge and tool access, while prompts cannot remove
+those capabilities. Generic remote APIs do not prove a monetary cap.
+**Impact:** New in-memory chat transport and UI only; no schema, scheduler,
+approval or task-run changes. **Evidence:**
+[UX04 audit and design](ux04-design.md). **Reversibility:** Disable the modern
+shell or remove the chat transport; no project data migration is needed.
+
 These records keep material choices visible for owner review. They do not change D-009, the approved product scope, or action policy. Owner approval and exact implementation revision are pending.
 
 ## UX-D01 · Navigation and disclosure

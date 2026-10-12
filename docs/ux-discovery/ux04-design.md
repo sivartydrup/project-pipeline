@@ -1,8 +1,10 @@
 # UX04 implementation design and approval checkpoint
 
-Status: **architecture and spending decision pending** (12 October 2026). This is
-the required pre-implementation audit for the UX04 handoff; no application code
-or provider calls have been changed.
+Status: **architecture approved** by the owner on 12 October 2026. This was
+the required pre-implementation audit for the UX04 handoff. The owner approved
+an isolated, tool-free live chat interface, local inference endpoints and
+compatible remote configuration, with paid usage denied unless an enforceable
+provider spending limit exists. No paid model calls are authorized.
 
 ## Contract audit
 
@@ -28,7 +30,7 @@ or provider calls have been changed.
   price, enforceable monetary cap, or chat-specific authorization. The Pi
   extension's 30-call stop applies to task runs, not assistant conversations.
 
-## Proposed bounded implementation after owner decision
+## Bounded implementation
 
 1. Add a read-only `AssistantContext` assembled solely from selected-project
    service reads. Include a compact overview, current brief/plan revision and
@@ -56,7 +58,7 @@ or provider calls have been changed.
 
 ## Decision needed before application implementation
 
-**UX04-D01 (proposed):** authorize a new isolated, tool-free conversational
+**UX04-D01 (approved):** authorize a new isolated, tool-free conversational
 provider path, separate from approved task-run adapters, with explicit
 per-question Send and only a model whose use and price the owner has approved.
 No automatic paid-model choice is implied. The alternative is to implement
@@ -64,13 +66,18 @@ bounded context, conversation UI, mocked interface, and deterministic offline
 answers now, leaving live model responses unavailable until a separate
 provider and spending decision. Both preserve the current approval policy.
 
-The UX04 handoff explicitly requires stopping before implementation when live
-conversation needs a new authorization boundary, spending decision, or
-architecture change. This audit finds all three unresolved for the existing
-task-run route. Owner selection of the path and any live provider/model
-authorization is therefore required before application code is changed.
+The owner selected the isolated route. The implementation uses an explicit
+OpenAI-compatible chat completions endpoint and model entered in the modern
+shell; no model or endpoint is configured by default. Only explicit loopback
+HTTP endpoints with a port may be called. Remote HTTPS configuration is
+recognized but paid requests fail closed because this generic API cannot
+verify a provider-enforced spending cap. A future provider-specific cap
+adapter can be added without changing project records or approval policy.
+Credentials, when needed, are read from a `PIPELINE_ASSISTANT_*` environment variable at Send
+time and are never stored in app settings. No agent adapter, tool bridge, Git
+checkout, shell, or domain mutation API is passed to the chat transport.
 
-## Planned evidence after approval
+## Evidence and limitations
 
 Mocked isolation, citation, cancellation, malformed-response, stale-context,
 redaction, prompt-injection, no-mutation, and usage-disclosure tests; Windows
@@ -78,3 +85,13 @@ native 1024/1440 light/dark and 100/200% screenshots; keyboard and AccessKit
 checks where feasible; format, Clippy, workspace tests, and production build
 logs. M1 Max and real screen-reader checks remain later gates. Live model tests
 will be reported only if an approved provider is available.
+
+The Windows mocked and loopback fixtures cover streaming, malformed response,
+tool-call denial, permission denial, cancellation, project separation, secret
+redaction and paid remote rejection. The native screenshots use deterministic
+offline guidance from an isolated sample database. There was no live model
+call. Cancellation immediately stops UI delivery; the underlying synchronous
+HTTP read may remain open until its short read timeout. Local endpoint
+operators must ensure the service does not proxy requests to a paid backend;
+the app cannot inspect the server behind a loopback URL. Remote paid inference
+remains unavailable pending a verifiable provider-side cap integration.

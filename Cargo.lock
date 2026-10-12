@@ -2451,6 +2451,9 @@ dependencies = [
  "pipeline-terminal",
  "serde",
  "serde_json",
+ "tempfile",
+ "ureq",
+ "url",
  "uuid",
 ]
 
