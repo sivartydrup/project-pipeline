@@ -10,7 +10,7 @@ members = [
     "crates/pipeline-app",
     "crates/pipeline-cli",
 ]
-exclude = ["spikes/desktop", "spikes/pty"]
+exclude = ["spikes/desktop", "spikes/pty", "spikes/modern-studio-native"]
 
 [workspace.package]
 version = "0.1.0"

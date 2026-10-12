@@ -1,0 +1,9 @@
+[package]
+name = "modern-studio-native-spike"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "default_fonts", "glow", "x11", "wayland"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
