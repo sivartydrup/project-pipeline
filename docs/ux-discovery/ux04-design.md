@@ -91,7 +91,8 @@ tool-call denial, permission denial, cancellation, project separation, secret
 redaction and paid remote rejection. The native screenshots use deterministic
 offline guidance from an isolated sample database. There was no live model
 call. Cancellation immediately stops UI delivery; the underlying synchronous
-HTTP read may remain open until its short read timeout. Local endpoint
+HTTP read may remain open until its overall request timeout (see the PR #5
+refinement record). Local endpoint
 operators must ensure the service does not proxy requests to a paid backend;
 the app cannot inspect the server behind a loopback URL. Remote paid inference
 remains unavailable pending a verifiable provider-side cap integration.

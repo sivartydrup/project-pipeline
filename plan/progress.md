@@ -24,7 +24,10 @@ Updated 12 October 2026. Task acceptance follows `plan/backlog.json`; an impleme
 
 The MacBook Pro M1 Max is not yet available. Native macOS checks remain release requirements and do not block Windows foundation work.
 
-UX04 is implemented on `codex/ux04-readonly-assistant` and awaits owner PR
-review. Scope and evidence are in
+UX04 is implemented on `codex/ux04-readonly-assistant`; PR #5 review
+refinements to cancellation, bounded workers, context sanitization, and
+regression coverage are complete. Live local inference remains unverified
+because no suitable endpoint was running. Owner final review remains pending.
+Scope and evidence are in
 `docs/ux-discovery/ux04-implementation.md`. UX05 and P16–P19 remain
 unstarted; no acceptance or release gate changed.

@@ -79,8 +79,59 @@ every possible secret; the selected local endpoint receives the bounded
 context and is trusted to remain local. The app cannot inspect whether a
 loopback server itself proxies to a paid backend. Remote paid inference is
 closed until a provider-specific cap can be checked before requests. A
-cancelled synchronous HTTP read may remain open until its read timeout,
+cancelled synchronous HTTP read may remain open until its overall timeout,
 though the UI stops accepting its response immediately.
+
+## PR #5 review refinements (13 October 2026)
+
+Cancellation now closes the request's receiver immediately, and the transport
+checks cancellation before emitting each event. Switching projects cancels an
+in-flight request for the previous project. Each retry gets a fresh channel
+and cancellation token, so late events have no path into a later turn. At most
+two assistant HTTP workers can run at once; if both slots are occupied while
+old requests finish, the UI asks the owner to retry shortly. A full event
+queue cancels its worker. SSE lines are read with a 64 KiB bound, including
+streams that never send a newline. The request has a 65-second overall HTTP
+timeout and a 60-second streaming deadline checked between lines.
+
+`ureq` 2.12 has no request-abort handle for an active synchronous read.
+Its overall timeout takes precedence over the read timeout. UI delivery stops
+promptly, but an abandoned worker can remain until the network call returns
+or times out. The two-worker cap bounds thread and connection accumulation;
+retry can temporarily report that earlier requests are finishing. A server
+that stalls midway through a read can therefore delay reclaiming a slot.
+
+Context assembly still uses only selected-project service views and a fixed
+field list: project name/status, brief goal/audience and revision, plan
+revision, active task titles/status, recent decision questions/status, and
+the deterministic next action. Per-field limits and a 6,000-character total
+bound apply. A revised sanitizer normalizes whitespace, removes common key
+and credential forms, environment assignments/references, URLs, and path-like
+text, and omits very long fields. This reduces accidental disclosure; no
+pattern filter can guarantee discovery of an arbitrary secret embedded in
+owner-supplied project text. The owner should review sensitive project text
+before explicitly sending it to a local endpoint. The endpoint itself remains
+trusted to stay local; the app cannot prove it does not proxy elsewhere.
+
+Added regression tests cover a stalled streaming fixture, cancellation,
+late responses, project switching, retry isolation, oversized SSE lines,
+multiline secrets, unusual whitespace, credential formats, URLs, paths,
+environment assignments, prompt injection, and cross-project context. The
+standard Windows verification was rerun after the refinement:
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --all --check` | Pass | [log](../evidence/ux04-review-fmt.log) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Pass | [log](../evidence/ux04-review-clippy.log) |
+| `cargo test --workspace` | Pass | [log](../evidence/ux04-review-test.log) |
+| `cargo build -p pipeline-app` | Pass | [log](../evidence/ux04-review-build.log) |
+
+No suitable local OpenAI-compatible model endpoint was running. The common
+loopback inference ports (1234, 11434, 8000, 8080, 5000, 5001, 3000) had no
+listener, and the other loopback listeners belonged to unrelated services.
+No model was downloaded or service started. Live model selection, grounded
+answers, provider/model rendering, and live cancellation remain unverified;
+local HTTP fixtures verify protocol handling and error states instead.
 
 To return to the prior UI, unset `PIPELINE_MODERN_SHELL` or set it to a value
 other than `1`. No migration or data rollback is needed. The owner should

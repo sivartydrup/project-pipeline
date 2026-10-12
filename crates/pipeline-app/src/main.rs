@@ -17,7 +17,7 @@ use assistant::{ChatConfig, ChatEvent, CompatibleProvider, ConversationProvider}
 use run_worker::{RunCommand, RunControl, RunLaunch, RunUpdate};
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc,
 };
 
@@ -65,6 +65,16 @@ struct ChatSession {
     receiver: Option<mpsc::Receiver<ChatEvent>>,
     cancel: Option<Arc<AtomicBool>>,
     fingerprint: String,
+}
+
+const MAX_ASSISTANT_WORKERS: usize = 2;
+
+struct AssistantWorkerSlot(Arc<AtomicUsize>);
+
+impl Drop for AssistantWorkerSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 struct ChatTurn {
@@ -138,6 +148,7 @@ struct DesktopApp {
     assistant_drafts: AssistantDrafts,
     assistant_config: ChatConfig,
     assistant_sessions: BTreeMap<String, ChatSession>,
+    assistant_workers: Arc<AtomicUsize>,
     focus_composer: bool,
     focus_return: bool,
     next_action_cache: Option<(String, Instant, Result<NextAction, String>)>,
@@ -219,6 +230,7 @@ impl Default for DesktopApp {
             assistant_drafts: AssistantDrafts::default(),
             assistant_config: ChatConfig::default(),
             assistant_sessions: BTreeMap::new(),
+            assistant_workers: Arc::new(AtomicUsize::new(0)),
             focus_composer: false,
             focus_return: false,
             next_action_cache: None,
@@ -2625,18 +2637,33 @@ impl DesktopApp {
             turn.status = "Offline guidance".into();
             session.turns.push(turn);
         } else {
+            if self
+                .assistant_workers
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                    (n < MAX_ASSISTANT_WORKERS).then_some(n + 1)
+                })
+                .is_err()
+            {
+                turn.status = "Earlier requests are finishing; retry shortly".into();
+                session.turns.push(turn);
+                return;
+            }
             let config = self.assistant_config.clone();
             let (tx, rx) = mpsc::sync_channel(128);
             let cancel = Arc::new(AtomicBool::new(false));
             let worker_cancel = cancel.clone();
+            let worker_count = self.assistant_workers.clone();
             std::thread::spawn(move || {
+                let _slot = AssistantWorkerSlot(worker_count);
                 CompatibleProvider.respond(
                     &config,
                     &context,
                     &question,
                     &worker_cancel,
                     &mut |event| {
-                        let _ = tx.send(event);
+                        if !worker_cancel.load(Ordering::Acquire) && tx.try_send(event).is_err() {
+                            worker_cancel.store(true, Ordering::Release);
+                        }
                     },
                 );
             });
@@ -2648,7 +2675,19 @@ impl DesktopApp {
     }
 
     fn poll_assistant(&mut self, ctx: &egui::Context) {
+        let current_project = self.assistant_key();
         for (project_id, session) in &mut self.assistant_sessions {
+            if *project_id != current_project && session.receiver.is_some() {
+                if let Some(cancel) = &session.cancel {
+                    cancel.store(true, Ordering::Release);
+                }
+                session.receiver = None;
+                session.cancel = None;
+                if let Some(turn) = session.turns.last_mut() {
+                    turn.status = "Cancelled on project switch".into();
+                }
+                continue;
+            }
             let mut finished = false;
             if let Some(receiver) = &session.receiver {
                 loop {
@@ -2715,7 +2754,7 @@ impl DesktopApp {
     fn cancel_assistant(&mut self) {
         if let Some(session) = self.assistant_sessions.get_mut(&self.assistant_key()) {
             if let Some(cancel) = &session.cancel {
-                cancel.store(true, Ordering::Relaxed);
+                cancel.store(true, Ordering::Release);
             }
             session.receiver = None;
             session.cancel = None;
@@ -3512,6 +3551,53 @@ mod assistant_draft_tests {
         assert_eq!(
             app.assistant_sessions[&alpha.id].turns[0].question,
             "What next?"
+        );
+    }
+
+    #[test]
+    fn project_switch_and_retry_discard_late_worker_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut engine = ProjectEngine::open(temp.path().join("assistant.sqlite")).unwrap();
+        let alpha = engine
+            .create_new(temp.path().join("alpha"), "Alpha")
+            .unwrap();
+        let beta = engine.create_new(temp.path().join("beta"), "Beta").unwrap();
+        let mut app = DesktopApp::default();
+        app.engine = Some(engine);
+        app.selected_project = Some(alpha.id.clone());
+        app.studio_home = false;
+        let (old_tx, old_rx) = mpsc::sync_channel(4);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let session = app.assistant_sessions.entry(alpha.id.clone()).or_default();
+        session.receiver = Some(old_rx);
+        session.cancel = Some(cancelled.clone());
+        session.turns.push(ChatTurn {
+            question: "old".into(),
+            answer: String::new(),
+            status: "Loading".into(),
+            sources: vec![],
+            usage: String::new(),
+            requested_identity: String::new(),
+            reported_model: None,
+        });
+        app.selected_project = Some(beta.id.clone());
+        app.poll_assistant(&egui::Context::default());
+        assert!(cancelled.load(Ordering::Acquire));
+        assert!(old_tx.send(ChatEvent::Delta("late".into())).is_err());
+        assert_eq!(
+            app.assistant_sessions[&alpha.id].turns[0].status,
+            "Cancelled on project switch"
+        );
+        assert!(!app.assistant_sessions.contains_key(&beta.id));
+        app.selected_project = Some(alpha.id.clone());
+        *app.assistant_drafts.active_mut(Some(&alpha.id)) = "retry".into();
+        app.send_assistant();
+        assert_eq!(app.assistant_sessions[&alpha.id].turns.len(), 2);
+        assert_eq!(app.assistant_sessions[&alpha.id].turns[1].question, "retry");
+        assert!(
+            !app.assistant_sessions[&alpha.id].turns[1]
+                .answer
+                .contains("late")
         );
     }
 }
