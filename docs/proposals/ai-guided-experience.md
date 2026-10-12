@@ -69,3 +69,33 @@ Owner preference: **guided dashboard with an always-available AI assistant**, ra
 - Offer actionable suggested prompts and explicit previews, not invisible autonomous state changes.
 - Show what was observed vs inferred, why next step is recommended, and which approvals are required.
 - Preserve project workflow when AI provider is unavailable; deterministic guidance and manual controls remain.
+
+## Balanced autonomy direction selected (2026-10-12)
+Owner preference: **proactive guidance and preparation, with approved work progressing automatically**. This is design-direction feedback, not authorization to change the approved baseline or run implementation.
+
+### Operating modes and state machine
+- Default mode: Guided Auto. The coordinator recommends and prepares actions, and can auto-start the next ready task only when brief/scope/task approvals, provider/model authorization, run limits, permissions and dependency checks all pass.
+- User-visible controls: Pause after current task, Pause now (safe cancellation), Resume eligible work, Review pending, Autonomy settings. Never equate pausing with accepting work.
+- Coordinator is deterministic on permitted transitions; assistant text never grants authority. Task completion remains review -> explicit acceptance, with no self-acceptance by the model.
+- Work may continue on unrelated approved tasks when another awaits review, subject to one active code-changing run per project and existing policy. No infinite auto-retry; use bounded retry and escalation.
+- Auto-continuation after acceptance must re-evaluate scope, dependencies, approvals, provider limits, and current project state. Do not imply autonomous release or payment authorization.
+- UI should distinguish Working, Waiting for review, Needs decision, Paused, Blocked, Interrupted, Offline, and Ready; explain each state in ordinary language.
+
+### Dashboard contract
+- Primary action card: one prioritized next action, reason, effect and link; alternatives accessible.
+- Activity: live active run, plain-language summary, elapsed time, guardrail consumption and stop/pause controls.
+- Attention: grouped reviews/decisions/blockers; never mix with passive notifications.
+- Journey: current lifecycle stage, completed milestones grounded in accepted evidence, upcoming steps, and ability to inspect roadmap.
+- Assistant: persistent composer, expandable contextual conversation, actionable typed proposal cards, preview/diff, refine and explicit approval. No UI card directly mutates approved scope without domain service checks.
+- Empty/offline/first-run: deterministic next-step guidance without a model connection.
+
+### Autonomy configuration requirements
+- Plain-language modes: Suggest only; Guided Auto (default); Custom. Distinguish preparation from execution.
+- Per-project harness/model choice, maximum model calls/tokens/time and cost exposure, allowed local actions, review checkpoints, and pause behavior. Show actual provider support and fail closed if caps cannot be enforced.
+- Always require scoped approval for external publication, production changes, spending, credentials, destructive actions and material scope changes.
+
+### Next design deliverables before code
+- Detailed desktop screen flows and component states for global home, project home, assistant proposal, active run, review, interrupted run and onboarding.
+- User-visible terminology glossary translating technical domain terms to approachable language without discarding audit records.
+- High-fidelity interactive prototypes for Windows and macOS with light/dark themes and accessibility checks.
+- Owner review of design prototypes and authorization to sequence UX tasks ahead of P16–P19.
