@@ -1,6 +1,6 @@
 # Implementation progress
 
-Updated 11 October 2026. Task acceptance follows `plan/backlog.json`; an implementation note or passing compile does not by itself accept a task.
+Updated 12 October 2026. Task acceptance follows `plan/backlog.json`; an implementation note or passing compile does not by itself accept a task.
 
 | Task | State | Evidence / remaining work |
 | --- | --- | --- |
@@ -23,3 +23,12 @@ Updated 11 October 2026. Task acceptance follows `plan/backlog.json`; an impleme
 | P16–P19 | Not started | Dependencies and gates in `plan/backlog.json`. P07 verification remains separate. |
 
 The MacBook Pro M1 Max is not yet available. Native macOS checks remain release requirements and do not block Windows foundation work.
+
+UX04 is implemented on `codex/ux04-readonly-assistant`; PR #5 review
+refinements to cancellation, bounded workers, context sanitization, and
+regression coverage are complete. The owner-authorized OpenRouter free-model
+smoke passed with four requests; live local inference remains unverified
+because no suitable local endpoint was running. Owner final review remains pending.
+Scope and evidence are in
+`docs/ux-discovery/ux04-implementation.md`. UX05 and P16–P19 remain
+unstarted; no acceptance or release gate changed.

@@ -1,0 +1,9 @@
+   Compiling pipeline-app v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.55s
+     Running unittests src\main.rs (target\debug\deps\pipeline_app-a2afac4c97f64eec.exe)
+
+running 1 test
+model=Some("nvidia/nemotron-3.5-lightning:free"); model_events=1; errors=[]; answer="The task status for synthetic-task-1 is ready."; usage_events=1
+test assistant::tests::live_openrouter_free_stream_cancel_and_retry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 6.15s

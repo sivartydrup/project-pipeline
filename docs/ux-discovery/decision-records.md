@@ -1,5 +1,21 @@
 # UX design decision records · proposed
 
+## UX-D08 · UX04 conversational boundary and spending gate
+
+**Status:** Owner approved isolated, tool-free live chat architecture on 12
+October 2026; implementation choice is in PR review. **Decision:** Keep the
+assistant separate from OpenCode and Pi task-run adapters. Require explicit
+provider/model/endpoint configuration and Send. Allow loopback inference
+endpoints; keep remote paid requests closed until a provider-specific,
+verifiable spending cap can be enforced. **Alternative:** Reuse task-run
+sessions with prompt-only restrictions. **Reason:** Existing task adapters
+grant checkout, write bridge and tool access, while prompts cannot remove
+those capabilities. Generic remote APIs do not prove a monetary cap.
+**Impact:** New in-memory chat transport and UI only; no schema, scheduler,
+approval or task-run changes. **Evidence:**
+[UX04 audit and design](ux04-design.md). **Reversibility:** Disable the modern
+shell or remove the chat transport; no project data migration is needed.
+
 These records keep material choices visible for owner review. They do not change D-009, the approved product scope, or action policy. Owner approval and exact implementation revision are pending.
 
 ## UX-D01 · Navigation and disclosure
@@ -33,3 +49,11 @@ These records keep material choices visible for owner review. They do not change
 ## UX-D07 · Draft context and recovery guidance
 
 **Status:** Implemented for PR #4 owner review on 12 October 2026. **Choice:** Keep one in-memory draft per project ID and one separate portfolio draft; the compact and expanded editors bind to the active context. Show an interrupted or failed persisted run before a generic blocked-task inbox entry. **Reason:** Project switching must not reveal another project's unsent text, and saved run recovery is the more specific action when that run caused the blocker. **Alternative:** Retain one shell-wide draft and the original generic blocker priority. **Impact:** UI memory and read-only recommendation order only; no persistence, provider, scheduler, policy, schema or approval change. **Evidence:** [refinement record](ux02-ux03-implementation.md) and [workspace tests](../evidence/ux02-ux03-review-test.log). **Reversibility:** Both choices are local to the feature-flagged shell and recommendation function.
+
+## UX-D09 · Bounded synchronous cancellation
+
+**Status:** Implemented for PR #5 owner review on 13 October 2026. **Choice:** Keep the small synchronous `ureq` transport, cancel UI delivery and close its channel immediately, and cap active HTTP workers at two with an overall timeout. **Alternative:** Add an async HTTP runtime solely to gain request abort. **Reason:** The existing transport exposes no active-read abort handle. A bounded worker pool keeps cancellation and retry behavior predictable without broadening the app architecture. **Impact:** A cancelled request can occupy a worker slot until its HTTP timeout; further sends may briefly require retry. No domain state or action policy changes. **Evidence:** [refinement record](ux04-implementation.md) and [workspace tests](../evidence/ux04-review-test.log). **Reversibility:** The transport can later be replaced behind `ConversationProvider`.
+
+## UX-D10 · OpenRouter free-model test route
+
+**Status:** Implemented for PR #5 owner review under the owner's 13 October authorization of up to 30 free-model requests. **Choice:** Permit only the exact OpenRouter HTTPS chat endpoint with a `:free` model ID and the existing `OPENROUTER_API_KEY`, checking live prompt and completion prices before each Send. Provide a preset for the verified model. **Alternative:** Leave all remote calls disabled until a paid provider cap exists. **Reason:** This permits a real streaming smoke without authorizing paid inference or changing task-run tools. **Impact:** Explicitly sent bounded synthetic or project context reaches OpenRouter; no automatic calls, schema, scheduler, approvals, or domain mutations. Price and free-variant semantics can change between lookup and inference, so this is not an enforceable monetary cap for paid use. **Evidence:** [live smoke](../evidence/ux04-openrouter-live.log) and [implementation record](ux04-implementation.md). **Reversibility:** Remove the preset and exact OpenRouter route.

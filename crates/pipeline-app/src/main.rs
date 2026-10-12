@@ -3,6 +3,7 @@ use pipeline_engine::{
     BriefContent, CriterionSpec, DecisionInput, DependencyKind, DependencySpec, DiscoveryView,
     EpicSpec, InboxItem, MilestoneSpec, NextAction, NextDestination, PlanContent, PlanView,
     ProjectEngine, ProjectOverview, ResearchInput, ReviewView, TaskRunReview, TaskSpec,
+    sanitize_assistant_text,
 };
 use pipeline_terminal::TerminalSession;
 use serde::{Deserialize, Serialize};
@@ -10,8 +11,15 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
+mod assistant;
 mod run_worker;
+use assistant::{ChatConfig, ChatEvent, CompatibleProvider, ConversationProvider};
 use run_worker::{RunCommand, RunControl, RunLaunch, RunUpdate};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    mpsc,
+};
 
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
@@ -49,6 +57,34 @@ struct TerminalTab {
 struct AssistantDrafts {
     portfolio: String,
     projects: BTreeMap<String, String>,
+}
+
+#[derive(Default)]
+struct ChatSession {
+    turns: Vec<ChatTurn>,
+    receiver: Option<mpsc::Receiver<ChatEvent>>,
+    cancel: Option<Arc<AtomicBool>>,
+    fingerprint: String,
+}
+
+const MAX_ASSISTANT_WORKERS: usize = 2;
+
+struct AssistantWorkerSlot(Arc<AtomicUsize>);
+
+impl Drop for AssistantWorkerSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+struct ChatTurn {
+    question: String,
+    answer: String,
+    status: String,
+    sources: Vec<String>,
+    usage: String,
+    requested_identity: String,
+    reported_model: Option<String>,
 }
 
 impl AssistantDrafts {
@@ -110,6 +146,9 @@ struct DesktopApp {
     advanced_open: bool,
     assistant_open: bool,
     assistant_drafts: AssistantDrafts,
+    assistant_config: ChatConfig,
+    assistant_sessions: BTreeMap<String, ChatSession>,
+    assistant_workers: Arc<AtomicUsize>,
     focus_composer: bool,
     focus_return: bool,
     next_action_cache: Option<(String, Instant, Result<NextAction, String>)>,
@@ -189,6 +228,9 @@ impl Default for DesktopApp {
             advanced_open: false,
             assistant_open: false,
             assistant_drafts: AssistantDrafts::default(),
+            assistant_config: ChatConfig::default(),
+            assistant_sessions: BTreeMap::new(),
+            assistant_workers: Arc::new(AtomicUsize::new(0)),
             focus_composer: false,
             focus_return: false,
             next_action_cache: None,
@@ -337,6 +379,12 @@ impl Default for DesktopApp {
                 }
             }
             None => app.message = Some("No local application data directory found".to_owned()),
+        }
+        #[cfg(feature = "screenshot-evidence")]
+        if let Ok(question) = std::env::var("PIPELINE_UX_ASK") {
+            let context = app.assistant_context().map(str::to_owned);
+            *app.assistant_drafts.active_mut(context.as_deref()) = question;
+            app.send_assistant();
         }
         app
     }
@@ -2496,9 +2544,229 @@ impl DesktopApp {
         }
     }
 
+    fn assistant_key(&self) -> String {
+        self.assistant_context().unwrap_or("").to_owned()
+    }
+
+    fn send_assistant(&mut self) {
+        let key = self.assistant_key();
+        let question = self
+            .assistant_drafts
+            .active(if key.is_empty() { None } else { Some(&key) })
+            .trim();
+        if question.is_empty() || question.len() > assistant::MAX_QUESTION {
+            return;
+        }
+        let question = sanitize_assistant_text(question, assistant::MAX_QUESTION);
+        if self
+            .assistant_sessions
+            .get(&key)
+            .is_some_and(|s| s.receiver.is_some())
+        {
+            return;
+        }
+        if !self.assistant_sessions.contains_key(&key)
+            && self.assistant_sessions.len() >= 32
+            && let Some(oldest) = self.assistant_sessions.keys().next().cloned()
+            && let Some(session) = self.assistant_sessions.remove(&oldest)
+            && let Some(cancel) = session.cancel
+        {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        let session = self.assistant_sessions.entry(key.clone()).or_default();
+        if session.turns.len() >= 12 {
+            session.turns.remove(0);
+        }
+        let mut turn = ChatTurn {
+            question: question.clone(),
+            answer: String::new(),
+            status: "Loading".into(),
+            sources: Vec::new(),
+            usage: "Cost unavailable".into(),
+            requested_identity: if self.assistant_config.provider.is_empty() {
+                "No provider requested".into()
+            } else {
+                format!(
+                    "Requested: {}/{}",
+                    sanitize_assistant_text(&self.assistant_config.provider, 80),
+                    sanitize_assistant_text(&self.assistant_config.model, 80)
+                )
+            },
+            reported_model: None,
+        };
+        if key.is_empty() {
+            turn.answer =
+                "Select a project for record-backed guidance. No provider was contacted.".into();
+            turn.status = "Offline guidance".into();
+            session.turns.push(turn);
+            self.assistant_drafts.active_mut(None).clear();
+            return;
+        }
+        let Some(engine) = self.engine.as_ref() else {
+            turn.status = "Project data unavailable".into();
+            session.turns.push(turn);
+            return;
+        };
+        let context = match engine.assistant_context(&key) {
+            Ok(context) => context,
+            Err(_) => {
+                turn.status = "Project context unavailable".into();
+                session.turns.push(turn);
+                return;
+            }
+        };
+        turn.sources = context.records.clone();
+        session.fingerprint = context.fingerprint.clone();
+        if let Err(error) = self.assistant_config.validate() {
+            let action = engine.next_action(&key).ok();
+            let overview = self.projects.iter().find(|project| project.id == key);
+            turn.answer = format!(
+                "Observed: {}.\n\nInterpretation: {}.\n\nUnknown: Live answers are unavailable ({error}). No provider was contacted. Changes require a future typed proposal and owner review.",
+                overview.map_or("Project status unavailable".to_owned(), |project| format!(
+                    "{} is in {:?} with {} blocked tasks",
+                    sanitize_assistant_text(&project.name, 100),
+                    project.stage,
+                    project.blocked_count
+                )),
+                action.map_or("Review the project records".to_owned(), |action| format!(
+                    "{} — {}",
+                    sanitize_assistant_text(&action.title, 120),
+                    sanitize_assistant_text(action.reason.trim_end_matches('.'), 240)
+                ))
+            );
+            turn.status = "Offline guidance".into();
+            session.turns.push(turn);
+        } else {
+            if self
+                .assistant_workers
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                    (n < MAX_ASSISTANT_WORKERS).then_some(n + 1)
+                })
+                .is_err()
+            {
+                turn.status = "Earlier requests are finishing; retry shortly".into();
+                session.turns.push(turn);
+                return;
+            }
+            let config = self.assistant_config.clone();
+            let (tx, rx) = mpsc::sync_channel(128);
+            let cancel = Arc::new(AtomicBool::new(false));
+            let worker_cancel = cancel.clone();
+            let worker_count = self.assistant_workers.clone();
+            std::thread::spawn(move || {
+                let _slot = AssistantWorkerSlot(worker_count);
+                CompatibleProvider.respond(
+                    &config,
+                    &context,
+                    &question,
+                    &worker_cancel,
+                    &mut |event| {
+                        if !worker_cancel.load(Ordering::Acquire) && tx.try_send(event).is_err() {
+                            worker_cancel.store(true, Ordering::Release);
+                        }
+                    },
+                );
+            });
+            session.turns.push(turn);
+            session.receiver = Some(rx);
+            session.cancel = Some(cancel);
+        }
+        self.assistant_drafts.active_mut(Some(&key)).clear();
+    }
+
+    fn poll_assistant(&mut self, ctx: &egui::Context) {
+        let current_project = self.assistant_key();
+        for (project_id, session) in &mut self.assistant_sessions {
+            if *project_id != current_project && session.receiver.is_some() {
+                if let Some(cancel) = &session.cancel {
+                    cancel.store(true, Ordering::Release);
+                }
+                session.receiver = None;
+                session.cancel = None;
+                if let Some(turn) = session.turns.last_mut() {
+                    turn.status = "Cancelled on project switch".into();
+                }
+                continue;
+            }
+            let mut finished = false;
+            if let Some(receiver) = &session.receiver {
+                loop {
+                    let event = match receiver.try_recv() {
+                        Ok(event) => event,
+                        Err(mpsc::TryRecvError::Empty) => break,
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            finished = true;
+                            if let Some(turn) = session.turns.last_mut()
+                                && (turn.status == "Loading" || turn.status == "Streaming")
+                            {
+                                turn.status = "Provider disconnected".into();
+                            }
+                            break;
+                        }
+                    };
+                    let Some(turn) = session.turns.last_mut() else {
+                        break;
+                    };
+                    match event {
+                        ChatEvent::Delta(chunk) => {
+                            turn.answer.push_str(&chunk);
+                            if turn.status != "Buffered" {
+                                turn.status = "Streaming".into();
+                            }
+                        }
+                        ChatEvent::Usage(value) => turn.usage = value,
+                        ChatEvent::Model(value) => {
+                            turn.reported_model = Some(sanitize_assistant_text(&value, 120));
+                        }
+                        ChatEvent::Buffered => turn.status = "Buffered".into(),
+                        ChatEvent::Done => {
+                            if turn.status != "Buffered" {
+                                turn.status = "Complete".into();
+                            }
+                            finished = true;
+                        }
+                        ChatEvent::Error(error) => {
+                            turn.status = error;
+                            finished = true;
+                        }
+                    }
+                }
+            }
+            if finished {
+                session.receiver = None;
+                session.cancel = None;
+                if !project_id.is_empty()
+                    && self
+                        .engine
+                        .as_ref()
+                        .and_then(|engine| engine.assistant_context(project_id).ok())
+                        .is_none_or(|fresh| fresh.fingerprint != session.fingerprint)
+                    && let Some(turn) = session.turns.last_mut()
+                {
+                    turn.status = "Stale project context — refresh and retry".into();
+                }
+            } else if session.receiver.is_some() {
+                ctx.request_repaint_after(Duration::from_millis(50));
+            }
+        }
+    }
+
+    fn cancel_assistant(&mut self) {
+        if let Some(session) = self.assistant_sessions.get_mut(&self.assistant_key()) {
+            if let Some(cancel) = &session.cancel {
+                cancel.store(true, Ordering::Release);
+            }
+            session.receiver = None;
+            session.cancel = None;
+            if let Some(turn) = session.turns.last_mut() {
+                turn.status = "Cancelled".into();
+            }
+        }
+    }
+
     fn assistant_content(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Guidance");
-        ui.label("Deterministic project guidance is available on Overview. Conversational AI is not connected in this phase.");
+        ui.heading("Project assistant");
+        ui.label("Read-only answers. Changes require a future typed proposal and owner review.");
         ui.separator();
         ui.label(if self.studio_home {
             "Context: all projects".to_owned()
@@ -2511,19 +2779,90 @@ impl DesktopApp {
                     .map_or("no project", |p| p.name.as_str())
             )
         });
-        if !self
-            .assistant_drafts
-            .active(self.assistant_context())
-            .is_empty()
-        {
-            ui.label("Your draft is saved for this session. It has not been sent or applied.");
+        ui.collapsing("Provider settings", |ui| {
+            ui.label("Local loopback inference and verified OpenRouter free variants are supported. Paid remote calls remain blocked.");
+            if ui.button("Use OpenRouter free model").clicked() {
+                self.assistant_config.provider = "OpenRouter".into();
+                self.assistant_config.model = "nvidia/nemotron-3.5-lightning:free".into();
+                self.assistant_config.endpoint = "https://openrouter.ai/api/v1/chat/completions".into();
+                self.assistant_config.credential_env = "OPENROUTER_API_KEY".into();
+            }
+            ui.label("Provider"); ui.text_edit_singleline(&mut self.assistant_config.provider);
+            ui.label("Model"); ui.text_edit_singleline(&mut self.assistant_config.model);
+            ui.label("Endpoint"); ui.text_edit_singleline(&mut self.assistant_config.endpoint);
+            ui.label("Credential environment variable (PIPELINE_ASSISTANT_* locally; OPENROUTER_API_KEY for OpenRouter)");
+            ui.text_edit_singleline(&mut self.assistant_config.credential_env);
+        });
+        let key = self.assistant_key();
+        ui.label(format!(
+            "Configured provider: {} · Requested model: {} · Cost: unavailable",
+            if self.assistant_config.provider.is_empty() {
+                "none"
+            } else {
+                &self.assistant_config.provider
+            },
+            if self.assistant_config.model.is_empty() {
+                "none"
+            } else {
+                &self.assistant_config.model
+            }
+        ));
+        if let Some(session) = self.assistant_sessions.get(&key) {
+            egui::ScrollArea::vertical()
+                .max_height(300.0)
+                .show(ui, |ui| {
+                    for turn in &session.turns {
+                        ui.separator();
+                        ui.strong(&turn.question);
+                        ui.label(&turn.status);
+                        ui.label(&turn.answer);
+                        ui.small(&turn.requested_identity);
+                        if turn.status != "Offline guidance" {
+                            ui.small(format!(
+                                "Provider-reported model: {}",
+                                turn.reported_model.as_deref().unwrap_or("unavailable")
+                            ));
+                        }
+                        ui.collapsing(format!("Sources ({})", turn.sources.len()), |ui| {
+                            for source in &turn.sources {
+                                ui.small(source);
+                            }
+                        });
+                        ui.small(&turn.usage);
+                    }
+                });
         }
         let context = self.assistant_context().map(str::to_owned);
         ui.add(
             egui::TextEdit::multiline(self.assistant_drafts.active_mut(context.as_deref()))
                 .desired_rows(4)
-                .hint_text("Draft guidance question; nothing is sent"),
+                .hint_text("Ask about this project"),
         );
+        ui.horizontal(|ui| {
+            if ui.button("Send question").clicked() {
+                self.send_assistant();
+            }
+            if self
+                .assistant_sessions
+                .get(&key)
+                .is_some_and(|s| s.receiver.is_some())
+                && ui.button("Cancel").clicked()
+            {
+                self.cancel_assistant();
+            }
+            if ui.button("Retry").clicked()
+                && let Some(last) = self
+                    .assistant_sessions
+                    .get(&key)
+                    .and_then(|s| s.turns.last())
+            {
+                let question = last.question.clone();
+                *self
+                    .assistant_drafts
+                    .active_mut(if key.is_empty() { None } else { Some(&key) }) = question;
+                self.send_assistant();
+            }
+        });
         if ui.button("Close guidance (Esc)").clicked() {
             self.assistant_open = false;
             self.focus_return = true;
@@ -2532,6 +2871,7 @@ impl DesktopApp {
 
     fn modern_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        self.poll_assistant(&ctx);
         self.poll_run(&ctx);
         let mut visuals = if self.dark_mode {
             egui::Visuals::dark()
@@ -2646,20 +2986,24 @@ impl DesktopApp {
         if !self.advanced_open {
             egui::Panel::bottom("studio_composer").show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Draft question");
+                    ui.label("Ask");
                     let context = self.assistant_context().map(str::to_owned);
                     let response = ui.add(
                         egui::TextEdit::singleline(
                             self.assistant_drafts.active_mut(context.as_deref()),
                         )
                         .desired_width(ui.available_width() - 140.0)
-                        .hint_text("AI is not connected yet"),
+                        .hint_text("Ask about the selected project"),
                     );
                     if self.focus_composer {
                         response.request_focus();
                         self.focus_composer = false;
                     }
-                    if ui.button("Guidance").clicked() {
+                    if ui.button("Send").clicked() {
+                        self.send_assistant();
+                        self.assistant_open = true;
+                    }
+                    if ui.button("Open").clicked() {
                         self.assistant_open = true;
                     }
                 });
@@ -2670,7 +3014,9 @@ impl DesktopApp {
                 .resizable(true)
                 .default_size(310.0)
                 .min_size(250.0)
-                .show(ui, |ui| self.assistant_content(ui));
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| self.assistant_content(ui));
+                });
         }
         if self.advanced_open {
             egui::Panel::top("advanced_tools").show(ui, |ui| {
@@ -2726,7 +3072,10 @@ impl DesktopApp {
                     .id(egui::Id::new("studio_assistant_drawer"))
                     .anchor(egui::Align2::RIGHT_CENTER, [-8.0, 0.0])
                     .default_width(300.0)
-                    .show(&ctx, |ui| self.assistant_content(ui));
+                    .show(&ctx, |ui| {
+                        ui.set_max_height(ctx.content_rect().height() - 24.0);
+                        egui::ScrollArea::vertical().show(ui, |ui| self.assistant_content(ui));
+                    });
             }
         }
         #[cfg(feature = "screenshot-evidence")]
@@ -3174,5 +3523,87 @@ mod assistant_draft_tests {
         assert!(composer_shortcut(&[key(egui::Modifiers::CTRL)]));
         assert!(composer_shortcut(&[key(egui::Modifiers::COMMAND)]));
         assert!(!composer_shortcut(&[key(egui::Modifiers::NONE)]));
+    }
+
+    #[test]
+    fn offline_turns_and_inflight_channels_stay_under_origin_project() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut engine = ProjectEngine::open(temp.path().join("assistant.sqlite")).unwrap();
+        let alpha = engine
+            .create_new(temp.path().join("alpha"), "Alpha")
+            .unwrap();
+        let beta = engine.create_new(temp.path().join("beta"), "Beta").unwrap();
+        let mut app = DesktopApp::default();
+        app.engine = Some(engine);
+        app.selected_project = Some(alpha.id.clone());
+        app.studio_home = false;
+        *app.assistant_drafts.active_mut(Some(&alpha.id)) = "What next?".into();
+        app.send_assistant();
+        assert_eq!(app.assistant_sessions[&alpha.id].turns.len(), 1);
+        assert!(
+            app.assistant_sessions[&alpha.id].turns[0]
+                .sources
+                .contains(&alpha.id)
+        );
+        app.selected_project = Some(beta.id.clone());
+        assert!(!app.assistant_sessions.contains_key(&beta.id));
+        *app.assistant_drafts.active_mut(Some(&beta.id)) = "Status?".into();
+        app.send_assistant();
+        assert!(
+            !app.assistant_sessions[&beta.id].turns[0]
+                .answer
+                .contains(&alpha.id)
+        );
+        assert_eq!(
+            app.assistant_sessions[&alpha.id].turns[0].question,
+            "What next?"
+        );
+    }
+
+    #[test]
+    fn project_switch_and_retry_discard_late_worker_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut engine = ProjectEngine::open(temp.path().join("assistant.sqlite")).unwrap();
+        let alpha = engine
+            .create_new(temp.path().join("alpha"), "Alpha")
+            .unwrap();
+        let beta = engine.create_new(temp.path().join("beta"), "Beta").unwrap();
+        let mut app = DesktopApp::default();
+        app.engine = Some(engine);
+        app.selected_project = Some(alpha.id.clone());
+        app.studio_home = false;
+        let (old_tx, old_rx) = mpsc::sync_channel(4);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let session = app.assistant_sessions.entry(alpha.id.clone()).or_default();
+        session.receiver = Some(old_rx);
+        session.cancel = Some(cancelled.clone());
+        session.turns.push(ChatTurn {
+            question: "old".into(),
+            answer: String::new(),
+            status: "Loading".into(),
+            sources: vec![],
+            usage: String::new(),
+            requested_identity: String::new(),
+            reported_model: None,
+        });
+        app.selected_project = Some(beta.id.clone());
+        app.poll_assistant(&egui::Context::default());
+        assert!(cancelled.load(Ordering::Acquire));
+        assert!(old_tx.send(ChatEvent::Delta("late".into())).is_err());
+        assert_eq!(
+            app.assistant_sessions[&alpha.id].turns[0].status,
+            "Cancelled on project switch"
+        );
+        assert!(!app.assistant_sessions.contains_key(&beta.id));
+        app.selected_project = Some(alpha.id.clone());
+        *app.assistant_drafts.active_mut(Some(&alpha.id)) = "retry".into();
+        app.send_assistant();
+        assert_eq!(app.assistant_sessions[&alpha.id].turns.len(), 2);
+        assert_eq!(app.assistant_sessions[&alpha.id].turns[1].question, "retry");
+        assert!(
+            !app.assistant_sessions[&alpha.id].turns[1]
+                .answer
+                .contains("late")
+        );
     }
 }
