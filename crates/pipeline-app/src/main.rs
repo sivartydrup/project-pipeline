@@ -1,8 +1,8 @@
 use eframe::egui;
 use pipeline_engine::{
     BriefContent, CriterionSpec, DecisionInput, DependencyKind, DependencySpec, DiscoveryView,
-    EpicSpec, InboxItem, MilestoneSpec, PlanContent, PlanView, ProjectEngine, ProjectOverview,
-    ResearchInput, ReviewView, TaskRunReview, TaskSpec,
+    EpicSpec, InboxItem, MilestoneSpec, NextAction, NextDestination, PlanContent, PlanView,
+    ProjectEngine, ProjectOverview, ResearchInput, ReviewView, TaskRunReview, TaskSpec,
 };
 use pipeline_terminal::TerminalSession;
 use serde::{Deserialize, Serialize};
@@ -45,6 +45,34 @@ struct TerminalTab {
     error: Option<String>,
 }
 
+#[derive(Default)]
+struct AssistantDrafts {
+    portfolio: String,
+    projects: BTreeMap<String, String>,
+}
+
+impl AssistantDrafts {
+    fn active(&self, project_id: Option<&str>) -> &str {
+        match project_id {
+            Some(id) => self.projects.get(id).map_or("", String::as_str),
+            None => &self.portfolio,
+        }
+    }
+
+    fn active_mut(&mut self, project_id: Option<&str>) -> &mut String {
+        match project_id {
+            Some(id) => self.projects.entry(id.to_owned()).or_default(),
+            None => &mut self.portfolio,
+        }
+    }
+}
+
+fn composer_shortcut(events: &[egui::Event]) -> bool {
+    events.iter().any(|event| {
+        matches!(event, egui::Event::Key { key: egui::Key::K, pressed: true, modifiers, .. } if modifiers.command || modifiers.ctrl)
+    })
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Overview,
@@ -73,6 +101,18 @@ enum DecisionAction {
 }
 
 struct DesktopApp {
+    #[cfg(feature = "screenshot-evidence")]
+    capture_path: Option<String>,
+    #[cfg(feature = "screenshot-evidence")]
+    capture_frames: u8,
+    modern_shell: bool,
+    studio_home: bool,
+    advanced_open: bool,
+    assistant_open: bool,
+    assistant_drafts: AssistantDrafts,
+    focus_composer: bool,
+    focus_return: bool,
+    next_action_cache: Option<(String, Instant, Result<NextAction, String>)>,
     data_dir: Option<PathBuf>,
     engine: Option<ProjectEngine>,
     projects: Vec<ProjectOverview>,
@@ -140,6 +180,18 @@ impl Default for DesktopApp {
             .and_then(|bytes| serde_json::from_slice::<LayoutPrefs>(&bytes).ok())
             .unwrap_or_default();
         let mut app = Self {
+            #[cfg(feature = "screenshot-evidence")]
+            capture_path: std::env::var("PIPELINE_UX_SCREENSHOT").ok(),
+            #[cfg(feature = "screenshot-evidence")]
+            capture_frames: 0,
+            modern_shell: std::env::var("PIPELINE_MODERN_SHELL").is_ok_and(|value| value == "1"),
+            studio_home: true,
+            advanced_open: false,
+            assistant_open: false,
+            assistant_drafts: AssistantDrafts::default(),
+            focus_composer: false,
+            focus_return: false,
+            next_action_cache: None,
             data_dir: data_dir.clone(),
             engine: None,
             projects: Vec::new(),
@@ -211,6 +263,17 @@ impl Default for DesktopApp {
             next_terminal_id: 1,
             terminal_message: None,
         };
+        #[cfg(feature = "screenshot-evidence")]
+        {
+            if let Ok(scale) = std::env::var("PIPELINE_UX_SCALE") {
+                app.text_scale = scale.parse::<f32>().unwrap_or(1.0).clamp(0.8, 2.0);
+            }
+            if let Ok(theme) = std::env::var("PIPELINE_UX_DARK") {
+                app.dark_mode = theme == "1";
+            }
+            app.assistant_open = std::env::var("PIPELINE_UX_ASSISTANT").is_ok_and(|v| v == "1");
+            app.advanced_open = std::env::var("PIPELINE_UX_ADVANCED").is_ok_and(|v| v == "1");
+        }
         let database = data_dir.map(|dir| dir.join("portfolio.sqlite"));
         match database {
             Some(database) => {
@@ -238,6 +301,10 @@ impl Default for DesktopApp {
                         app.global_inbox = engine.global_inbox().unwrap_or_default();
                         app.selected_project =
                             app.projects.first().map(|project| project.id.clone());
+                        #[cfg(feature = "screenshot-evidence")]
+                        if std::env::var("PIPELINE_UX_OPEN_PROJECT").is_ok_and(|v| v == "1") {
+                            app.studio_home = false;
+                        }
                         if let Some(project_id) = &app.selected_project {
                             match engine.load_discovery(project_id) {
                                 Ok(view) => {
@@ -308,6 +375,8 @@ impl DesktopApp {
         match result {
             Ok(project) => {
                 self.selected_project = Some(project.id);
+                self.studio_home = false;
+                self.next_action_cache = None;
                 self.active_terminal = None;
                 match engine.list_overviews() {
                     Ok(projects) => {
@@ -412,6 +481,8 @@ impl DesktopApp {
 
     fn select_project(&mut self, id: String) {
         self.selected_project = Some(id.clone());
+        self.studio_home = false;
+        self.next_action_cache = None;
         self.run_diff = None;
         self.run_message = None;
         self.active_terminal = self
@@ -2224,6 +2295,470 @@ impl DesktopApp {
             }
         }
     }
+
+    fn open_next_action(&mut self, action: &NextAction) {
+        self.active_tab = match action.destination {
+            NextDestination::Brief => Tab::Brief,
+            NextDestination::Plan => Tab::Plan,
+            NextDestination::Decisions => Tab::Decisions,
+            NextDestination::Runs => Tab::Runs,
+            NextDestination::Overview => Tab::Overview,
+        };
+        self.advanced_open = true;
+    }
+
+    fn studio_card(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) {
+        let fill = if ui.visuals().dark_mode {
+            egui::Color32::from_rgb(34, 39, 39)
+        } else {
+            egui::Color32::from_rgb(255, 254, 251)
+        };
+        let stroke = if ui.visuals().dark_mode {
+            egui::Color32::from_rgb(68, 77, 75)
+        } else {
+            egui::Color32::from_rgb(218, 222, 216)
+        };
+        egui::Frame::group(ui.style())
+            .fill(fill)
+            .stroke(egui::Stroke::new(1.0, stroke))
+            .inner_margin(egui::Margin::same(16))
+            .corner_radius(12)
+            .show(ui, |ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                ui.set_min_width((ui.available_width() - 32.0).clamp(120.0, 850.0));
+                content(ui);
+            });
+    }
+
+    fn studio_home(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Your projects");
+        ui.label("A clear view of what needs attention, based on saved project records.");
+        ui.add_space(12.0);
+        if self.projects.is_empty() {
+            Self::studio_card(ui, |ui| {
+                ui.heading("Start with a project");
+                ui.label("Import an existing folder or create a new project in Advanced. No progress has been recorded yet.");
+            });
+            if ui.button("Open project setup").clicked() {
+                self.advanced_open = true;
+            }
+            return;
+        }
+        if let Some(item) = self.global_inbox.first().cloned() {
+            let name = self
+                .projects
+                .iter()
+                .find(|p| p.id == item.project_id)
+                .map_or("Project", |p| p.name.as_str())
+                .to_owned();
+            Self::studio_card(ui, |ui| {
+                ui.strong("Needs attention");
+                ui.heading(format!("{name}: {}", item.title));
+                ui.label(&item.detail);
+            });
+            if ui.button("Open attention item").clicked() {
+                self.select_project(item.project_id);
+                self.active_tab = match item.kind.as_str() {
+                    "brief" => Tab::Brief,
+                    "plan" | "task" => Tab::Plan,
+                    _ => Tab::Decisions,
+                };
+                self.advanced_open = true;
+            }
+        } else {
+            ui.label("No owner requests are currently recorded.");
+        }
+        ui.add_space(12.0);
+        let projects = self.projects.clone();
+        for project in projects {
+            Self::studio_card(ui, |ui| {
+                ui.strong(&project.name);
+                ui.label(format!(
+                    "{} · {} · {:.1}% verified · {} blocked",
+                    project.stage.as_str(),
+                    project.health.as_str(),
+                    project.verified_completion_basis_points as f32 / 100.0,
+                    project.blocked_count
+                ));
+                ui.label(&project.next_owner_action);
+            });
+            if ui.button(format!("Open {}", project.name)).clicked() {
+                self.select_project(project.id);
+            }
+            ui.add_space(8.0);
+        }
+    }
+
+    fn studio_project(&mut self, ui: &mut egui::Ui) {
+        let Some(project) = self
+            .projects
+            .iter()
+            .find(|p| self.selected_project.as_deref() == Some(&p.id))
+            .cloned()
+        else {
+            ui.heading("Choose a project");
+            return;
+        };
+        ui.heading(&project.name);
+        ui.label(format!(
+            "{} · {}",
+            project.stage.as_str(),
+            project.health.as_str().replace('_', " ")
+        ));
+        ui.add_space(12.0);
+        if self
+            .next_action_cache
+            .as_ref()
+            .is_none_or(|(id, at, _)| id != &project.id || at.elapsed() > Duration::from_secs(3))
+        {
+            let result = self
+                .engine
+                .as_ref()
+                .ok_or_else(|| "Project data is unavailable".to_owned())
+                .and_then(|engine| {
+                    engine
+                        .next_action(&project.id)
+                        .map_err(|error| error.to_string())
+                });
+            self.next_action_cache = Some((project.id.clone(), Instant::now(), result));
+        }
+        let result = self
+            .next_action_cache
+            .as_ref()
+            .map(|(_, _, result)| result.clone());
+        match result {
+            Some(Ok(action)) => {
+                Self::studio_card(ui, |ui| {
+                    ui.strong("Recommended next");
+                    ui.heading(&action.title);
+                    ui.label(&action.reason);
+                    ui.add_space(6.0);
+                    ui.label(format!("Before acting: {}", action.prerequisite));
+                    ui.label(format!("Alternative: {}", action.alternative));
+                    ui.small(
+                        "Based on saved project records. Exact IDs are available in Advanced.",
+                    )
+                    .on_hover_text(format!("Source IDs: {}", action.source_ids.join(", ")));
+                });
+                if ui.button("Open record").clicked() {
+                    self.open_next_action(&action);
+                }
+            }
+            Some(Err(error)) => {
+                ui.colored_label(
+                    egui::Color32::from_rgb(175, 65, 55),
+                    format!("Guidance unavailable: {error}"),
+                );
+            }
+            None => {
+                ui.label("Project data is unavailable.");
+            }
+        }
+        ui.add_space(12.0);
+        Self::studio_card(ui, |ui| {
+            ui.strong("Project snapshot");
+            if self
+                .plan
+                .as_ref()
+                .is_some_and(|plan| plan.active_scope_revision > 0)
+            {
+                ui.label(format!(
+                    "Verified completion: {:.1}% of approved scope",
+                    project.verified_completion_basis_points as f32 / 100.0
+                ));
+            } else {
+                ui.label("No approved work scope yet. Verified completion is unavailable.");
+            }
+            ui.label(format!("Blocked tasks: {}", project.blocked_count));
+            ui.label(format!("Folder: {}", project.path));
+        });
+        ui.add_space(12.0);
+        ui.horizontal_wrapped(|ui| {
+            for (tab, label) in [
+                (Tab::Brief, "Product direction"),
+                (Tab::Plan, "Work plan"),
+                (Tab::Decisions, "Decisions"),
+                (Tab::Runs, "Work and evidence"),
+            ] {
+                if ui.button(label).clicked() {
+                    self.active_tab = tab;
+                    self.advanced_open = true;
+                }
+            }
+        });
+    }
+
+    fn assistant_context(&self) -> Option<&str> {
+        if self.studio_home {
+            None
+        } else {
+            self.selected_project.as_deref()
+        }
+    }
+
+    fn assistant_content(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Guidance");
+        ui.label("Deterministic project guidance is available on Overview. Conversational AI is not connected in this phase.");
+        ui.separator();
+        ui.label(if self.studio_home {
+            "Context: all projects".to_owned()
+        } else {
+            format!(
+                "Context: {}",
+                self.projects
+                    .iter()
+                    .find(|p| self.selected_project.as_deref() == Some(&p.id))
+                    .map_or("no project", |p| p.name.as_str())
+            )
+        });
+        if !self
+            .assistant_drafts
+            .active(self.assistant_context())
+            .is_empty()
+        {
+            ui.label("Your draft is saved for this session. It has not been sent or applied.");
+        }
+        let context = self.assistant_context().map(str::to_owned);
+        ui.add(
+            egui::TextEdit::multiline(self.assistant_drafts.active_mut(context.as_deref()))
+                .desired_rows(4)
+                .hint_text("Draft guidance question; nothing is sent"),
+        );
+        if ui.button("Close guidance (Esc)").clicked() {
+            self.assistant_open = false;
+            self.focus_return = true;
+        }
+    }
+
+    fn modern_ui(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        self.poll_run(&ctx);
+        let mut visuals = if self.dark_mode {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        };
+        visuals.override_text_color = Some(if self.dark_mode {
+            egui::Color32::from_rgb(235, 237, 235)
+        } else {
+            egui::Color32::from_rgb(42, 48, 47)
+        });
+        visuals.selection.bg_fill = egui::Color32::from_rgb(25, 119, 112);
+        visuals.panel_fill = if self.dark_mode {
+            egui::Color32::from_rgb(26, 30, 30)
+        } else {
+            egui::Color32::from_rgb(248, 247, 243)
+        };
+        visuals.widgets.inactive.bg_fill = if self.dark_mode {
+            egui::Color32::from_rgb(48, 57, 55)
+        } else {
+            egui::Color32::from_rgb(232, 238, 234)
+        };
+        visuals.widgets.hovered.bg_fill = if self.dark_mode {
+            egui::Color32::from_rgb(29, 103, 97)
+        } else {
+            egui::Color32::from_rgb(190, 226, 218)
+        };
+        ctx.set_visuals(visuals);
+        ui.style_mut().spacing.item_spacing = egui::vec2(8.0, 8.0);
+        ui.style_mut().spacing.button_padding = egui::vec2(10.0, 6.0);
+        ctx.set_zoom_factor(self.text_scale);
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && self.assistant_open {
+            self.assistant_open = false;
+            self.focus_return = true;
+        }
+        if ctx.input(|i| composer_shortcut(&i.events)) {
+            self.focus_composer = true;
+        }
+        let narrow = ui.available_width() < 860.0;
+        egui::Panel::top("studio_header").show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.strong(egui::RichText::new("Project Pipeline").size(18.0).color(
+                    if self.dark_mode {
+                        egui::Color32::from_rgb(80, 190, 177)
+                    } else {
+                        egui::Color32::from_rgb(26, 122, 115)
+                    },
+                ));
+                ui.separator();
+                if ui.button("Home").clicked() {
+                    self.studio_home = true;
+                    self.advanced_open = false;
+                }
+                if ui.button("Projects").clicked() {
+                    self.studio_home = true;
+                    self.advanced_open = false;
+                }
+                let current = self
+                    .projects
+                    .iter()
+                    .find(|p| self.selected_project.as_deref() == Some(&p.id))
+                    .map_or("Select project", |p| p.name.as_str())
+                    .to_owned();
+                let mut picked = None;
+                egui::ComboBox::from_id_salt("studio_project_switcher")
+                    .selected_text(current)
+                    .show_ui(ui, |ui| {
+                        for project in &self.projects {
+                            if ui
+                                .selectable_label(
+                                    self.selected_project.as_deref() == Some(&project.id),
+                                    &project.name,
+                                )
+                                .clicked()
+                            {
+                                picked = Some(project.id.clone());
+                            }
+                        }
+                    });
+                if let Some(id) = picked {
+                    self.select_project(id);
+                    self.advanced_open = false;
+                }
+                if ui
+                    .button(format!("Inbox ({})", self.global_inbox.len()))
+                    .clicked()
+                {
+                    self.studio_home = true;
+                }
+                if ui.button("Advanced").clicked() {
+                    self.advanced_open = !self.advanced_open;
+                }
+                let guidance = ui
+                    .push_id("assistant_toggle", |ui| ui.button("Guidance"))
+                    .inner;
+                if self.focus_return {
+                    guidance.request_focus();
+                    self.focus_return = false;
+                }
+                if guidance.clicked() {
+                    self.assistant_open = !self.assistant_open;
+                }
+                if ui.button("A−").clicked() {
+                    self.text_scale = (self.text_scale - 0.1).max(0.8);
+                }
+                if ui.button("A+").clicked() {
+                    self.text_scale = (self.text_scale + 0.1).min(2.0);
+                }
+                ui.checkbox(&mut self.dark_mode, "Dark");
+            });
+        });
+        if !self.advanced_open {
+            egui::Panel::bottom("studio_composer").show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Draft question");
+                    let context = self.assistant_context().map(str::to_owned);
+                    let response = ui.add(
+                        egui::TextEdit::singleline(
+                            self.assistant_drafts.active_mut(context.as_deref()),
+                        )
+                        .desired_width(ui.available_width() - 140.0)
+                        .hint_text("AI is not connected yet"),
+                    );
+                    if self.focus_composer {
+                        response.request_focus();
+                        self.focus_composer = false;
+                    }
+                    if ui.button("Guidance").clicked() {
+                        self.assistant_open = true;
+                    }
+                });
+            });
+        }
+        if self.assistant_open && !narrow && !self.advanced_open {
+            egui::Panel::right("studio_assistant")
+                .resizable(true)
+                .default_size(310.0)
+                .min_size(250.0)
+                .show(ui, |ui| self.assistant_content(ui));
+        }
+        if self.advanced_open {
+            egui::Panel::top("advanced_tools").show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.show_portfolio, "Project list (F1)");
+                    ui.checkbox(&mut self.show_terminal, "Terminal (F2)");
+                    if ui.button("Back to overview").clicked() {
+                        self.advanced_open = false;
+                        self.next_action_cache = None;
+                    }
+                });
+            });
+            if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+                self.show_portfolio = !self.show_portfolio;
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::F2)) {
+                self.show_terminal = !self.show_terminal;
+            }
+            if self.show_portfolio {
+                self.portfolio(ui);
+            }
+            for tab in &mut self.terminals {
+                if let Err(error) = tab.session.poll(32 * 1024) {
+                    tab.error = Some(error.to_string());
+                }
+            }
+            if !self.terminals.is_empty() {
+                ctx.request_repaint_after(Duration::from_millis(33));
+            }
+            if self.show_terminal {
+                let height = ui.available_height();
+                let panel = egui::Panel::bottom("terminal")
+                    .resizable(true)
+                    .default_size(height * self.terminal_fraction)
+                    .min_size(120.0)
+                    .show(ui, |ui| self.terminal_area(ui));
+                self.terminal_fraction =
+                    (panel.response.rect.height() / height.max(1.0)).clamp(0.2, 0.75);
+            }
+            egui::CentralPanel::default().show(ui, |ui| self.management(ui));
+        } else {
+            egui::CentralPanel::default().show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if self.studio_home {
+                        self.studio_home(ui);
+                    } else {
+                        self.studio_project(ui);
+                    }
+                });
+            });
+            if self.assistant_open && narrow {
+                egui::Window::new("Guidance")
+                    .id(egui::Id::new("studio_assistant_drawer"))
+                    .anchor(egui::Align2::RIGHT_CENTER, [-8.0, 0.0])
+                    .default_width(300.0)
+                    .show(&ctx, |ui| self.assistant_content(ui));
+            }
+        }
+        #[cfg(feature = "screenshot-evidence")]
+        self.capture_native(&ctx);
+    }
+
+    #[cfg(feature = "screenshot-evidence")]
+    fn capture_native(&mut self, ctx: &egui::Context) {
+        if let Some(path) = self.capture_path.as_ref() {
+            for event in ctx.input(|input| input.events.clone()) {
+                if let egui::Event::Screenshot { image, .. } = event {
+                    let pixels: Vec<u8> = image.pixels.iter().flat_map(|p| p.to_array()).collect();
+                    if let Err(error) = image::save_buffer(
+                        path,
+                        &pixels,
+                        image.width() as u32,
+                        image.height() as u32,
+                        image::ColorType::Rgba8,
+                    ) {
+                        eprintln!("screenshot failed: {error}");
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+            if self.capture_frames == 3 {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+            } else if self.capture_frames < 4 {
+                self.capture_frames += 1;
+                ctx.request_repaint();
+            }
+        }
+    }
 }
 
 fn brief_field(ui: &mut egui::Ui, label: &str, value: &mut String, rows: usize) {
@@ -2437,6 +2972,10 @@ fn plan_changes(before: &PlanContent, after: &PlanContent) -> Vec<String> {
 
 impl eframe::App for DesktopApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if self.modern_shell {
+            self.modern_ui(ui);
+            return;
+        }
         let ctx = ui.ctx().clone();
         self.poll_run(&ctx);
         ctx.set_visuals(if self.dark_mode {
@@ -2535,6 +3074,18 @@ fn headless_run_with_harness(args: &[String], pi: bool) -> Result<(), String> {
 
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().collect();
+    #[cfg(feature = "screenshot-evidence")]
+    if args.get(1).is_some_and(|arg| arg == "--seed-ux-smoke") {
+        if args.len() != 4 {
+            eprintln!("usage: --seed-ux-smoke <database> <project-folder>");
+            std::process::exit(2);
+        }
+        let mut engine = ProjectEngine::open(&args[2]).expect("open smoke database");
+        engine
+            .create_new(&args[3], "UX smoke sample")
+            .expect("create sample through domain service");
+        return Ok(());
+    }
     if args.get(1).is_some_and(|arg| arg == "--headless-run") {
         if let Err(error) = headless_run(&args[2..]) {
             eprintln!("{error}");
@@ -2549,8 +3100,18 @@ fn main() -> eframe::Result {
         }
         return Ok(());
     }
+    let size = [
+        std::env::var("PIPELINE_UX_WIDTH")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1100.0),
+        std::env::var("PIPELINE_UX_HEIGHT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(650.0),
+    ];
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1100.0, 650.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size(size),
         ..Default::default()
     };
     eframe::run_native(
@@ -2558,4 +3119,60 @@ fn main() -> eframe::Result {
         options,
         Box::new(|_cc| Ok(Box::<DesktopApp>::default())),
     )
+}
+
+#[cfg(test)]
+mod assistant_draft_tests {
+    use super::*;
+
+    #[test]
+    fn drafts_are_isolated_by_project_and_portfolio() {
+        let mut drafts = AssistantDrafts::default();
+        *drafts.active_mut(None) = "portfolio question".into();
+        *drafts.active_mut(Some("alpha")) = "alpha question".into();
+        assert_eq!(drafts.active(Some("beta")), "");
+        *drafts.active_mut(Some("beta")) = "beta question".into();
+        assert_eq!(drafts.active(Some("alpha")), "alpha question");
+        assert_eq!(drafts.active(Some("beta")), "beta question");
+        assert_eq!(drafts.active(None), "portfolio question");
+    }
+
+    #[test]
+    fn active_context_survives_panel_toggle_and_switching() {
+        let mut app = DesktopApp::default();
+        *app.assistant_drafts.active_mut(None) = "portfolio".into();
+        app.selected_project = Some("alpha".into());
+        app.studio_home = false;
+        let context = app.assistant_context().map(str::to_owned);
+        *app.assistant_drafts.active_mut(context.as_deref()) =
+            "shared compact and expanded draft".into();
+        app.assistant_open = true;
+        app.assistant_open = false;
+        app.selected_project = Some("beta".into());
+        assert_eq!(app.assistant_drafts.active(app.assistant_context()), "");
+        app.selected_project = Some("alpha".into());
+        assert_eq!(
+            app.assistant_drafts.active(app.assistant_context()),
+            "shared compact and expanded draft"
+        );
+        app.studio_home = true;
+        assert_eq!(
+            app.assistant_drafts.active(app.assistant_context()),
+            "portfolio"
+        );
+    }
+
+    #[test]
+    fn composer_shortcut_uses_modifiers_on_the_key_event() {
+        let key = |modifiers| egui::Event::Key {
+            key: egui::Key::K,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        assert!(composer_shortcut(&[key(egui::Modifiers::CTRL)]));
+        assert!(composer_shortcut(&[key(egui::Modifiers::COMMAND)]));
+        assert!(!composer_shortcut(&[key(egui::Modifiers::NONE)]));
+    }
 }

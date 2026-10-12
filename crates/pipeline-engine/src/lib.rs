@@ -18,9 +18,11 @@ use std::process::Command;
 use uuid::Uuid;
 mod opencode;
 mod pi;
+mod recommendation;
 mod scheduler;
 pub use opencode::{OpenCodeObservation, OpenCodePermissionOutcome};
 pub use pi::{PiObservation, PiPermissionOutcome};
+pub use recommendation::{NextAction, NextDestination, RecommendationSnapshot, recommend_next};
 pub use scheduler::{
     ActionClass, ActionSpec, PolicyOutcome, RecoveryRecord, RunLimits, RunStart, TaskPacket,
 };
@@ -594,6 +596,27 @@ impl ProjectEngine {
                 .then_with(|| a.title.cmp(&b.title))
         });
         Ok(items)
+    }
+
+    /// A read-only, record-backed next action. A failed source read is an error, never an empty state.
+    pub fn next_action(&self, project_id: &str) -> Result<NextAction> {
+        let project = self
+            .list_overviews()?
+            .into_iter()
+            .find(|project| project.id == project_id)
+            .ok_or_else(|| StoreError::NotFound(project_id.to_owned()))?;
+        let discovery = self.load_discovery(project_id)?;
+        let plan = self.load_plan(project_id)?;
+        let review = self.load_review(project_id)?;
+        let runs = self.list_task_run_reviews(project_id)?;
+        Ok(recommend_next(&RecommendationSnapshot {
+            project: &project,
+            discovery: &discovery,
+            plan: &plan,
+            review: &review,
+            runs: &runs,
+            provider_offline: false,
+        }))
     }
 
     pub fn propose_decision(

@@ -1,0 +1,1 @@
+cargo fmt --all --check: passed on Windows, 2026-10-12
