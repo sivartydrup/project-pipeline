@@ -32,6 +32,8 @@ cargo test --workspace
 cargo run -p pipeline-app
 ```
 
+The first native UX02/UX03 shell is available for owner review with `PIPELINE_MODERN_SHELL=1 cargo run -p pipeline-app` (set the environment variable in your shell on Windows). The default remains the existing interface. Advanced in the preview contains the existing management tabs and terminal. See the [implementation and verification record](docs/ux-discovery/ux02-ux03-implementation.md).
+
 The desktop imports existing folders and Git repositories, creates project folders, and shows projects from a local SQLite database. Portfolio stage, health, blocked count, and verified completion come from persisted state. The Brief and Research views support guided idea intake, versioned briefs, source-aware research, and exact-revision approval. The Plan view supports epics, weighted tasks, criteria, dependencies, scope approval, and manual evidence-based task review. The lower panel has project-scoped PTY terminal tabs. Agent runs remain a later integration. Set `PIPELINE_DATA_DIR` to use a separate local data directory for a test profile. The `spikes/` directory contains the initial UI and PTY prototypes and is excluded from the main Cargo workspace. See [implementation progress](plan/progress.md) for remaining verification.
 
 ## Approval boundary
