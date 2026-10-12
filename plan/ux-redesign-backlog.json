@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "plan_id": "project-pipeline-ux-proposal",
+  "status": "proposed",
+  "approval_required_before_execution": true,
+  "approval_record": null,
+  "relationship": "Supplemental proposed track; does not modify approved plan/backlog.json or authorize implementation",
+  "tasks": [
+    {
+      "id": "UX00",
+      "title": "Baseline UX audit and user journeys",
+      "depends_on": [],
+      "acceptance": [
+        "Inventory current screens and terminology with screenshots",
+        "Document first-time, import, return, blocked, review and release journeys",
+        "Identify accessibility and egui constraints; record user friction and baseline timings"
+      ],
+      "evidence": [
+        "screen-audit",
+        "journey-map",
+        "accessibility-risk-log"
+      ]
+    },
+    {
+      "id": "UX01",
+      "title": "Create design system and high-fidelity clickable prototypes",
+      "depends_on": [
+        "UX00"
+      ],
+      "acceptance": [
+        "Define tokens and reusable components for light/dark themes",
+        "Prototype portfolio, project home, assistant, guided brief, roadmap and review",
+        "Obtain owner approval of visual direction before replacing UI"
+      ],
+      "evidence": [
+        "design-spec",
+        "prototype",
+        "owner-feedback"
+      ]
+    },
+    {
+      "id": "UX02",
+      "title": "Implement navigation shell and progressive advanced mode",
+      "depends_on": [
+        "UX01"
+      ],
+      "acceptance": [
+        "Project Home is default and displays grounded next action",
+        "Advanced workspace preserves terminal and diagnostics",
+        "Responsive layout, focus order, keyboard access and scaling tested"
+      ],
+      "evidence": [
+        "screenshots",
+        "UI-tests",
+        "manual-smoke"
+      ]
+    },
+    {
+      "id": "UX03",
+      "title": "Build deterministic workflow recommendation engine",
+      "depends_on": [
+        "UX00"
+      ],
+      "acceptance": [
+        "Recommend next actions from persisted domain state, dependencies and approvals",
+        "Provide rationale, alternatives and blocked/offline recovery",
+        "No invented progress or false completion; deterministic fixture tests"
+      ],
+      "evidence": [
+        "decision-table",
+        "unit-tests"
+      ]
+    },
+    {
+      "id": "UX04",
+      "title": "Add project-scoped AI assistant read-only experience",
+      "depends_on": [
+        "UX02",
+        "UX03"
+      ],
+      "acceptance": [
+        "Ground responses in authorized project context with linked record IDs",
+        "Streaming/cancel/error/no-provider states; transparent provider/model/cost indication",
+        "No state mutation from conversational answers; redact secrets and defend against prompt injection"
+      ],
+      "evidence": [
+        "conversation-tests",
+        "security-tests",
+        "demo"
+      ]
+    },
+    {
+      "id": "UX05",
+      "title": "Add typed AI proposal and approval flow",
+      "depends_on": [
+        "UX04"
+      ],
+      "acceptance": [
+        "Structured preview for brief/task/plan changes with before-after and revision",
+        "Explicit apply and existing scope/action gates; stale proposal conflict handling",
+        "Audit trail and negative tests for unauthorized writes"
+      ],
+      "evidence": [
+        "contract-tests",
+        "security-tests",
+        "demo"
+      ]
+    },
+    {
+      "id": "UX06",
+      "title": "Create guided new/import/returning project journeys",
+      "depends_on": [
+        "UX03",
+        "UX05"
+      ],
+      "acceptance": [
+        "New user moves from idea to approved brief and roadmap via guided steps",
+        "Imported repository remains unchanged until authorized action",
+        "Returning project surfaces change summary and next step"
+      ],
+      "evidence": [
+        "journey-tests",
+        "screen-recordings"
+      ]
+    },
+    {
+      "id": "UX07",
+      "title": "Simplify agent runs, decisions and evidence review",
+      "depends_on": [
+        "UX02",
+        "UX05"
+      ],
+      "acceptance": [
+        "Human-readable run progress and results with optional raw details",
+        "Review shows changed outcome, checks, risk and accept/request-changes",
+        "Interrupted/blocked runs provide recovery without self-acceptance"
+      ],
+      "evidence": [
+        "review-journey",
+        "negative-tests"
+      ]
+    },
+    {
+      "id": "UX08",
+      "title": "Usability, accessibility and cross-platform release gate",
+      "depends_on": [
+        "UX06",
+        "UX07"
+      ],
+      "acceptance": [
+        "Test novice and experienced user journeys with findings and fixes",
+        "Keyboard, contrast, screen reader limitations, text scale, reduced motion documented",
+        "Windows and Apple Silicon macOS smoke, existing regression suite and CI pass",
+        "Owner signs off before release"
+      ],
+      "evidence": [
+        "usability-report",
+        "accessibility-matrix",
+        "CI-links",
+        "approval-record"
+      ]
+    }
+  ],
+  "execution_order": "UX00 -> UX01 owner design signoff -> UX02/UX03 -> UX04 -> UX05 -> UX06/UX07 -> UX08; reconcile with P16-P19 only after owner approves change"
+}
