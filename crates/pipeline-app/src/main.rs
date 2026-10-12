@@ -45,6 +45,34 @@ struct TerminalTab {
     error: Option<String>,
 }
 
+#[derive(Default)]
+struct AssistantDrafts {
+    portfolio: String,
+    projects: BTreeMap<String, String>,
+}
+
+impl AssistantDrafts {
+    fn active(&self, project_id: Option<&str>) -> &str {
+        match project_id {
+            Some(id) => self.projects.get(id).map_or("", String::as_str),
+            None => &self.portfolio,
+        }
+    }
+
+    fn active_mut(&mut self, project_id: Option<&str>) -> &mut String {
+        match project_id {
+            Some(id) => self.projects.entry(id.to_owned()).or_default(),
+            None => &mut self.portfolio,
+        }
+    }
+}
+
+fn composer_shortcut(events: &[egui::Event]) -> bool {
+    events.iter().any(|event| {
+        matches!(event, egui::Event::Key { key: egui::Key::K, pressed: true, modifiers, .. } if modifiers.command || modifiers.ctrl)
+    })
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Overview,
@@ -81,7 +109,7 @@ struct DesktopApp {
     studio_home: bool,
     advanced_open: bool,
     assistant_open: bool,
-    assistant_draft: String,
+    assistant_drafts: AssistantDrafts,
     focus_composer: bool,
     focus_return: bool,
     next_action_cache: Option<(String, Instant, Result<NextAction, String>)>,
@@ -160,7 +188,7 @@ impl Default for DesktopApp {
             studio_home: true,
             advanced_open: false,
             assistant_open: false,
-            assistant_draft: String::new(),
+            assistant_drafts: AssistantDrafts::default(),
             focus_composer: false,
             focus_return: false,
             next_action_cache: None,
@@ -2460,6 +2488,14 @@ impl DesktopApp {
         });
     }
 
+    fn assistant_context(&self) -> Option<&str> {
+        if self.studio_home {
+            None
+        } else {
+            self.selected_project.as_deref()
+        }
+    }
+
     fn assistant_content(&mut self, ui: &mut egui::Ui) {
         ui.heading("Guidance");
         ui.label("Deterministic project guidance is available on Overview. Conversational AI is not connected in this phase.");
@@ -2475,9 +2511,19 @@ impl DesktopApp {
                     .map_or("no project", |p| p.name.as_str())
             )
         });
-        if !self.assistant_draft.is_empty() {
+        if !self
+            .assistant_drafts
+            .active(self.assistant_context())
+            .is_empty()
+        {
             ui.label("Your draft is saved for this session. It has not been sent or applied.");
         }
+        let context = self.assistant_context().map(str::to_owned);
+        ui.add(
+            egui::TextEdit::multiline(self.assistant_drafts.active_mut(context.as_deref()))
+                .desired_rows(4)
+                .hint_text("Draft guidance question; nothing is sent"),
+        );
         if ui.button("Close guidance (Esc)").clicked() {
             self.assistant_open = false;
             self.focus_return = true;
@@ -2508,7 +2554,11 @@ impl DesktopApp {
         } else {
             egui::Color32::from_rgb(232, 238, 234)
         };
-        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(38, 124, 116);
+        visuals.widgets.hovered.bg_fill = if self.dark_mode {
+            egui::Color32::from_rgb(29, 103, 97)
+        } else {
+            egui::Color32::from_rgb(190, 226, 218)
+        };
         ctx.set_visuals(visuals);
         ui.style_mut().spacing.item_spacing = egui::vec2(8.0, 8.0);
         ui.style_mut().spacing.button_padding = egui::vec2(10.0, 6.0);
@@ -2517,17 +2567,19 @@ impl DesktopApp {
             self.assistant_open = false;
             self.focus_return = true;
         }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::K)) {
+        if ctx.input(|i| composer_shortcut(&i.events)) {
             self.focus_composer = true;
         }
         let narrow = ui.available_width() < 860.0;
         egui::Panel::top("studio_header").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.strong(
-                    egui::RichText::new("Project Pipeline")
-                        .size(18.0)
-                        .color(egui::Color32::from_rgb(26, 122, 115)),
-                );
+                ui.strong(egui::RichText::new("Project Pipeline").size(18.0).color(
+                    if self.dark_mode {
+                        egui::Color32::from_rgb(80, 190, 177)
+                    } else {
+                        egui::Color32::from_rgb(26, 122, 115)
+                    },
+                ));
                 ui.separator();
                 if ui.button("Home").clicked() {
                     self.studio_home = true;
@@ -2572,15 +2624,14 @@ impl DesktopApp {
                 if ui.button("Advanced").clicked() {
                     self.advanced_open = !self.advanced_open;
                 }
+                let guidance = ui
+                    .push_id("assistant_toggle", |ui| ui.button("Guidance"))
+                    .inner;
                 if self.focus_return {
-                    ui.memory_mut(|m| m.request_focus(egui::Id::new("assistant_toggle")));
+                    guidance.request_focus();
                     self.focus_return = false;
                 }
-                if ui
-                    .push_id("assistant_toggle", |ui| ui.button("Guidance"))
-                    .inner
-                    .clicked()
-                {
+                if guidance.clicked() {
                     self.assistant_open = !self.assistant_open;
                 }
                 if ui.button("A−").clicked() {
@@ -2596,10 +2647,13 @@ impl DesktopApp {
             egui::Panel::bottom("studio_composer").show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Draft question");
+                    let context = self.assistant_context().map(str::to_owned);
                     let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.assistant_draft)
-                            .desired_width(ui.available_width() - 140.0)
-                            .hint_text("AI is not connected yet"),
+                        egui::TextEdit::singleline(
+                            self.assistant_drafts.active_mut(context.as_deref()),
+                        )
+                        .desired_width(ui.available_width() - 140.0)
+                        .hint_text("AI is not connected yet"),
                     );
                     if self.focus_composer {
                         response.request_focus();
@@ -3065,4 +3119,60 @@ fn main() -> eframe::Result {
         options,
         Box::new(|_cc| Ok(Box::<DesktopApp>::default())),
     )
+}
+
+#[cfg(test)]
+mod assistant_draft_tests {
+    use super::*;
+
+    #[test]
+    fn drafts_are_isolated_by_project_and_portfolio() {
+        let mut drafts = AssistantDrafts::default();
+        *drafts.active_mut(None) = "portfolio question".into();
+        *drafts.active_mut(Some("alpha")) = "alpha question".into();
+        assert_eq!(drafts.active(Some("beta")), "");
+        *drafts.active_mut(Some("beta")) = "beta question".into();
+        assert_eq!(drafts.active(Some("alpha")), "alpha question");
+        assert_eq!(drafts.active(Some("beta")), "beta question");
+        assert_eq!(drafts.active(None), "portfolio question");
+    }
+
+    #[test]
+    fn active_context_survives_panel_toggle_and_switching() {
+        let mut app = DesktopApp::default();
+        *app.assistant_drafts.active_mut(None) = "portfolio".into();
+        app.selected_project = Some("alpha".into());
+        app.studio_home = false;
+        let context = app.assistant_context().map(str::to_owned);
+        *app.assistant_drafts.active_mut(context.as_deref()) =
+            "shared compact and expanded draft".into();
+        app.assistant_open = true;
+        app.assistant_open = false;
+        app.selected_project = Some("beta".into());
+        assert_eq!(app.assistant_drafts.active(app.assistant_context()), "");
+        app.selected_project = Some("alpha".into());
+        assert_eq!(
+            app.assistant_drafts.active(app.assistant_context()),
+            "shared compact and expanded draft"
+        );
+        app.studio_home = true;
+        assert_eq!(
+            app.assistant_drafts.active(app.assistant_context()),
+            "portfolio"
+        );
+    }
+
+    #[test]
+    fn composer_shortcut_uses_modifiers_on_the_key_event() {
+        let key = |modifiers| egui::Event::Key {
+            key: egui::Key::K,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        assert!(composer_shortcut(&[key(egui::Modifiers::CTRL)]));
+        assert!(composer_shortcut(&[key(egui::Modifiers::COMMAND)]));
+        assert!(!composer_shortcut(&[key(egui::Modifiers::NONE)]));
+    }
 }

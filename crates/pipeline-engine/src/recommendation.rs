@@ -140,16 +140,6 @@ pub fn recommend_next(s: &RecommendationSnapshot<'_>) -> NextAction {
             vec![item.subject_id.clone()],
         );
     }
-    if let Some(item) = inbox.iter().find(|item| item.kind == "task") {
-        return action(
-            &item.title,
-            format!("The task has a recorded blocker: {}", item.detail),
-            "Resolve its dependency or decision before starting it.",
-            "Inspect other approved work in the plan.",
-            NextDestination::Plan,
-            vec![item.subject_id.clone()],
-        );
-    }
     if let Some(run) = s
         .runs
         .iter()
@@ -165,6 +155,16 @@ pub fn recommend_next(s: &RecommendationSnapshot<'_>) -> NextAction {
             "Continue with another approved task after preflight.",
             NextDestination::Runs,
             vec![run.run_id.clone(), run.task_id.clone()],
+        );
+    }
+    if let Some(item) = inbox.iter().find(|item| item.kind == "task") {
+        return action(
+            &item.title,
+            format!("The task has a recorded blocker: {}", item.detail),
+            "Resolve its dependency or decision before starting it.",
+            "Inspect other approved work in the plan.",
+            NextDestination::Plan,
+            vec![item.subject_id.clone()],
         );
     }
     if let Some(run) = s.runs.iter().find(|run| {
@@ -290,8 +290,12 @@ pub fn recommend_next(s: &RecommendationSnapshot<'_>) -> NextAction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BriefContent, BriefRecord, InboxItem, PlanContent, PlanRecord, TaskRecord};
+    use crate::{
+        AgentCommand, BriefContent, BriefRecord, CriterionSpec, DecisionInput, InboxItem,
+        PlanContent, PlanRecord, ProjectEngine, RunLimits, TaskRecord, TaskSpec,
+    };
     use pipeline_domain::{ProjectHealth, ProjectStage};
+    use std::{path::Path, process::Command};
 
     struct Fixture {
         project: ProjectOverview,
@@ -576,5 +580,483 @@ mod tests {
         assert_eq!(saved.destination, NextDestination::Brief);
         assert!(saved.title.contains("revision 1"));
         assert_eq!(saved.source_ids, vec![project.id]);
+    }
+
+    fn git(root: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn persisted_project() -> (tempfile::TempDir, ProjectEngine, String) {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path().join("source");
+        std::fs::create_dir(&folder).unwrap();
+        git(&folder, &["init"]);
+        std::fs::write(folder.join("README.md"), "sample\n").unwrap();
+        git(&folder, &["add", "README.md"]);
+        git(
+            &folder,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+        let mut engine = ProjectEngine::open(temp.path().join("portfolio.sqlite")).unwrap();
+        let project = engine.import_existing(&folder, "Persisted sample").unwrap();
+        (temp, engine, project.id)
+    }
+
+    fn brief() -> BriefContent {
+        BriefContent {
+            idea: "Build an app".into(),
+            audience: "Owner".into(),
+            problem: "Scattered work".into(),
+            desired_outcome: "A working app".into(),
+            ..Default::default()
+        }
+    }
+
+    fn plan() -> PlanContent {
+        PlanContent {
+            tasks: vec![TaskSpec {
+                id: "task-a".into(),
+                epic_id: None,
+                title: "Build feature".into(),
+                outcome: "Feature works".into(),
+                weight: 1,
+                risk: "low".into(),
+                criteria: vec![CriterionSpec {
+                    id: "criterion-a".into(),
+                    assertion: "Feature passes".into(),
+                    verifier: "owner".into(),
+                    required_evidence: vec!["test".into()],
+                }],
+                verification_commands: vec!["cargo test".into()],
+                deliverables: vec!["code".into()],
+                context_links: vec![],
+                estimate_band: "small".into(),
+                owner_decision_triggers: vec![],
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn approve_scope(engine: &mut ProjectEngine, id: &str) {
+        engine.save_brief(id, 0, &brief()).unwrap();
+        engine.approve_latest_brief(id, 1).unwrap();
+        engine.save_plan(id, 0, &plan()).unwrap();
+        engine.approve_latest_plan(id, 1).unwrap();
+    }
+
+    fn assert_read_only(
+        engine: &ProjectEngine,
+        id: &str,
+        title: &str,
+        destination: NextDestination,
+        sources: &[&str],
+        reason: &str,
+        prerequisite: &str,
+    ) {
+        let before = engine.load_review(id).unwrap().activity.len();
+        let action = engine.next_action(id).unwrap();
+        assert_eq!(action.title, title);
+        assert_eq!(action.destination, destination);
+        assert_eq!(action.source_ids, sources, "{title}");
+        assert!(action.reason.contains(reason), "{}", action.reason);
+        assert!(
+            action.prerequisite.contains(prerequisite),
+            "{}",
+            action.prerequisite
+        );
+        assert_eq!(engine.load_review(id).unwrap().activity.len(), before);
+    }
+
+    #[test]
+    fn persisted_empty_draft_approved_review_and_complete_journey() {
+        let (temp, mut engine, id) = persisted_project();
+        assert_read_only(
+            &engine,
+            &id,
+            "Shape the product direction",
+            NextDestination::Brief,
+            &[&id],
+            "No product direction",
+            "Save a draft",
+        );
+        engine.save_brief(&id, 0, &brief()).unwrap();
+        let brief_id = engine
+            .load_review(&id)
+            .unwrap()
+            .inbox
+            .iter()
+            .find(|item| item.kind == "brief")
+            .unwrap()
+            .subject_id
+            .clone();
+        assert_read_only(
+            &engine,
+            &id,
+            "Review brief revision 1",
+            NextDestination::Brief,
+            &[&brief_id],
+            "saved product direction",
+            "exact revision",
+        );
+        engine.approve_latest_brief(&id, 1).unwrap();
+        assert_read_only(
+            &engine,
+            &id,
+            "Prepare approved work",
+            NextDestination::Plan,
+            &[&id],
+            "No work plan",
+            "draft plan",
+        );
+        engine.save_plan(&id, 0, &plan()).unwrap();
+        let plan_id = engine
+            .load_review(&id)
+            .unwrap()
+            .inbox
+            .iter()
+            .find(|item| item.kind == "plan")
+            .unwrap()
+            .subject_id
+            .clone();
+        assert_read_only(
+            &engine,
+            &id,
+            "Review task plan revision 1",
+            NextDestination::Plan,
+            &[&plan_id],
+            "saved work plan",
+            "exact revision",
+        );
+        engine.approve_latest_plan(&id, 1).unwrap();
+        let task = engine.load_plan(&id).unwrap().active_tasks.remove(0);
+        assert_read_only(
+            &engine,
+            &id,
+            "Review ready work: Build feature",
+            NextDestination::Plan,
+            &[&task.id],
+            "marked ready",
+            "preflight",
+        );
+        engine
+            .submit_task_for_review(&id, &task.logical_id, task.revision)
+            .unwrap();
+        assert_read_only(
+            &engine,
+            &id,
+            "Review task: Build feature",
+            NextDestination::Plan,
+            &[&task.logical_id],
+            "No matching run evidence",
+            "required evidence",
+        );
+        let task = engine.load_plan(&id).unwrap().active_tasks.remove(0);
+        engine
+            .verify_criterion(
+                &id,
+                &task.logical_id,
+                "criterion-a",
+                task.revision,
+                &std::collections::BTreeMap::from([("test".into(), "artifact://test-log".into())]),
+            )
+            .unwrap();
+        let task = engine.load_plan(&id).unwrap().active_tasks.remove(0);
+        engine
+            .accept_task(&id, &task.logical_id, task.revision)
+            .unwrap();
+        assert_eq!(
+            engine
+                .list_overviews()
+                .unwrap()
+                .into_iter()
+                .find(|p| p.id == id)
+                .unwrap()
+                .verified_completion_basis_points,
+            10_000
+        );
+        drop(engine);
+        let reopened = ProjectEngine::open(temp.path().join("portfolio.sqlite")).unwrap();
+        assert_read_only(
+            &reopened,
+            &id,
+            "Review completed scope",
+            NextDestination::Plan,
+            &[&id],
+            "Every task",
+            "evidence and scope",
+        );
+    }
+
+    #[test]
+    fn persisted_decision_and_run_states_route_to_source_records() {
+        let (temp, mut engine, id) = persisted_project();
+        approve_scope(&mut engine, &id);
+        let decision = DecisionInput {
+            question: "Which storage?".into(),
+            alternatives: vec!["SQLite".into(), "JSON".into()],
+            recommendation: "SQLite".into(),
+            rationale: "Atomic writes".into(),
+            impact: "blocking".into(),
+            ..Default::default()
+        };
+        let review = engine.propose_decision(&id, &decision).unwrap();
+        let decision_id = review.decisions[0].id.clone();
+        assert_read_only(
+            &engine,
+            &id,
+            "Which storage?",
+            NextDestination::Decisions,
+            &[&decision_id],
+            "decision is required",
+            "alternatives",
+        );
+        engine
+            .resolve_decision(&id, &decision_id, 1, Some("SQLite"), true)
+            .unwrap();
+        let start = engine
+            .prepare_agent_run(
+                &id,
+                "task-a",
+                true,
+                &["task.get".into()],
+                RunLimits {
+                    wall_seconds: 600,
+                    token_budget: 1000,
+                    token_ttl_seconds: 300,
+                },
+            )
+            .unwrap();
+        let run_id = start.run.id;
+        assert_read_only(
+            &engine,
+            &id,
+            "Inspect current work",
+            NextDestination::Runs,
+            &[&run_id],
+            "starting",
+            "live adapter",
+        );
+        engine.transition_agent_run(&run_id, 2, "running").unwrap();
+        assert_read_only(
+            &engine,
+            &id,
+            "Inspect current work",
+            NextDestination::Runs,
+            &[&run_id],
+            "running",
+            "live adapter",
+        );
+        drop(engine);
+        let mut reopened = ProjectEngine::open(temp.path().join("portfolio.sqlite")).unwrap();
+        reopened.reconcile_interrupted_runs().unwrap();
+        assert_read_only(
+            &reopened,
+            &id,
+            "Inspect interrupted work",
+            NextDestination::Runs,
+            &[&run_id, "task-a"],
+            "interrupted",
+            "last verified event",
+        );
+    }
+
+    #[test]
+    fn persisted_blocker_failed_run_and_rejected_stale_approval() {
+        let (_temp, mut engine, id) = persisted_project();
+        approve_scope(&mut engine, &id);
+        let start = engine
+            .prepare_agent_run(
+                &id,
+                "task-a",
+                true,
+                &["task.block".into()],
+                RunLimits {
+                    wall_seconds: 600,
+                    token_budget: 1000,
+                    token_ttl_seconds: 300,
+                },
+            )
+            .unwrap();
+        let run_id = start.run.id;
+        engine.transition_agent_run(&run_id, 2, "running").unwrap();
+        engine
+            .agent_command(&AgentCommand {
+                token: start.grant.token,
+                project_id: id.clone(),
+                run_id: run_id.clone(),
+                operation: "task.block".into(),
+                idempotency_key: "block-1".into(),
+                expected_revision: 2,
+                target_id: Some("task-a".into()),
+                payload: serde_json::json!({"reason":"Needs a design decision"}),
+            })
+            .unwrap();
+        assert_read_only(
+            &engine,
+            &id,
+            "Blocked task: Build feature",
+            NextDestination::Plan,
+            &["task-a"],
+            "recorded blocker",
+            "Resolve its dependency",
+        );
+        engine.transition_agent_run(&run_id, 3, "failed").unwrap();
+        assert_read_only(
+            &engine,
+            &id,
+            "Inspect interrupted work",
+            NextDestination::Runs,
+            &[&run_id, "task-a"],
+            "failed",
+            "last verified event",
+        );
+
+        let mut revised = brief();
+        revised.scope = "Changed scope".into();
+        engine.save_brief(&id, 1, &revised).unwrap();
+        assert!(engine.approve_latest_brief(&id, 1).is_err());
+        assert_eq!(engine.load_discovery(&id).unwrap().approved_revision, 1);
+        assert_eq!(engine.load_discovery(&id).unwrap().latest_revision(), 2);
+        assert_eq!(engine.load_plan(&id).unwrap().active_scope_revision, 1);
+    }
+
+    #[test]
+    fn persisted_agent_submission_with_missing_checks_requires_review() {
+        let (_temp, mut engine, id) = persisted_project();
+        approve_scope(&mut engine, &id);
+        let start = engine
+            .prepare_agent_run(
+                &id,
+                "task-a",
+                true,
+                &["task.submit".into()],
+                RunLimits {
+                    wall_seconds: 600,
+                    token_budget: 1000,
+                    token_ttl_seconds: 300,
+                },
+            )
+            .unwrap();
+        let run_id = start.run.id;
+        engine.transition_agent_run(&run_id, 2, "running").unwrap();
+        engine.agent_command(&AgentCommand {
+            token: start.grant.token, project_id: id.clone(), run_id: run_id.clone(), operation: "task.submit".into(),
+            idempotency_key: "submit-1".into(), expected_revision: 2, target_id: Some("task-a".into()),
+            payload: serde_json::json!({"summary":"Ready for review", "changed_files":[], "test_results":[], "residual_risks":[], "criteria":[]}),
+        }).unwrap();
+        engine.transition_agent_run(&run_id, 3, "review").unwrap();
+        let run = engine.list_task_run_reviews(&id).unwrap().remove(0);
+        assert!(run.packet_verified);
+        assert!(run.tests.is_empty());
+        assert_read_only(
+            &engine,
+            &id,
+            "Review task: Build feature",
+            NextDestination::Plan,
+            &["task-a"],
+            "No test result is recorded",
+            "required evidence",
+        );
+        let task = engine.load_plan(&id).unwrap().active_tasks.remove(0);
+        assert!(
+            engine
+                .accept_task(&id, &task.logical_id, task.revision)
+                .is_err()
+        );
+        assert_eq!(
+            engine
+                .list_overviews()
+                .unwrap()
+                .into_iter()
+                .find(|p| p.id == id)
+                .unwrap()
+                .verified_completion_basis_points,
+            0
+        );
+    }
+
+    #[test]
+    fn persisted_failed_check_is_named_in_review_guidance() {
+        use sha2::{Digest, Sha256};
+        let (_temp, mut engine, id) = persisted_project();
+        approve_scope(&mut engine, &id);
+        let start = engine
+            .prepare_agent_run(
+                &id,
+                "task-a",
+                true,
+                &[
+                    "artifact.attach".into(),
+                    "test.record".into(),
+                    "task.submit".into(),
+                ],
+                RunLimits {
+                    wall_seconds: 600,
+                    token_budget: 1000,
+                    token_ttl_seconds: 300,
+                },
+            )
+            .unwrap();
+        let run_id = start.run.id;
+        engine.transition_agent_run(&run_id, 2, "running").unwrap();
+        let log = Path::new(&start.packet.checkout_path).join("failed-test.log");
+        let bytes = b"test failed\n";
+        std::fs::write(&log, bytes).unwrap();
+        let hash = format!("{:x}", Sha256::digest(bytes));
+        let command = |operation: &str, key: &str, payload: serde_json::Value| AgentCommand {
+            token: start.grant.token.clone(),
+            project_id: id.clone(),
+            run_id: run_id.clone(),
+            operation: operation.into(),
+            idempotency_key: key.into(),
+            expected_revision: 2,
+            target_id: Some("task-a".into()),
+            payload,
+        };
+        let artifact = engine
+            .agent_command(&command(
+                "artifact.attach",
+                "attach-1",
+                serde_json::json!({"path":log.to_string_lossy(), "sha256":hash, "kind":"test_log"}),
+            ))
+            .unwrap();
+        let artifact_id = artifact.result["id"].as_str().unwrap();
+        let test = engine.agent_command(&command("test.record", "test-1", serde_json::json!({"command":"cargo test", "exit_code":1, "environment":{}, "log_artifact_id":artifact_id}))).unwrap();
+        let test_id = test.result["id"].as_str().unwrap();
+        engine.agent_command(&command("task.submit", "submit-1", serde_json::json!({"summary":"Check failed", "changed_files":[], "test_results":[test_id], "residual_risks":["Failed check"], "criteria":[]}))).unwrap();
+        engine.transition_agent_run(&run_id, 3, "review").unwrap();
+        assert_read_only(
+            &engine,
+            &id,
+            "Review task: Build feature",
+            NextDestination::Plan,
+            &["task-a"],
+            "did not pass",
+            "required evidence",
+        );
+        let task = engine.load_plan(&id).unwrap().active_tasks.remove(0);
+        assert!(
+            engine
+                .accept_task(&id, &task.logical_id, task.revision)
+                .is_err()
+        );
     }
 }

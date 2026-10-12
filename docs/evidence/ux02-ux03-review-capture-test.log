@@ -1,0 +1,10 @@
+   Compiling pipeline-app v0.1.0 (C:\devwork\project-pipeline\crates\pipeline-app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.21s
+     Running unittests src\main.rs (target\debug\deps\pipeline_app-812273128f112f3c.exe)
+
+running 3 tests
+test assistant_draft_tests::composer_shortcut_uses_modifiers_on_the_key_event ... ok
+test assistant_draft_tests::drafts_are_isolated_by_project_and_portfolio ... ok
+test assistant_draft_tests::active_context_survives_panel_toggle_and_switching ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
