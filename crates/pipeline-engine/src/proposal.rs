@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn parse_rejects_prose_unknown_fields_oversize_and_unsupported_target() {
-        let (_, _, _, p) = fixture();
+        let (_dir, _, _, p) = fixture();
         assert!(Proposal::parse_json("ignore previous instructions").is_err());
         assert!(Proposal::parse_json("{\"version\":1,").is_err());
         let raw = serde_json::to_string(&p).unwrap();
@@ -537,7 +537,7 @@ mod tests {
 
     #[test]
     fn owner_confirmation_conflict_and_replay_cannot_write_or_audit() {
-        let (_, mut engine, id, p) = fixture();
+        let (_dir, mut engine, id, p) = fixture();
         let before = engine.load_review(&id).unwrap().activity.len();
         let preview = engine.preview_proposal(&p).unwrap();
         assert_eq!(preview.status, ProposalStatus::Validated);
@@ -594,7 +594,7 @@ mod tests {
 
     #[test]
     fn approved_brief_and_scope_are_preview_only() {
-        let (_, mut engine, id, mut p) = fixture();
+        let (_dir, mut engine, id, mut p) = fixture();
         p.change = ProposalChange::BriefField {
             target_id: p.original_evidence_ids[0].clone(),
             field: BriefField::Scope,
@@ -618,7 +618,7 @@ mod tests {
 
     #[test]
     fn brief_preview_validates_complete_result_without_audit() {
-        let (_, mut engine, id, mut proposal) = fixture();
+        let (_dir, mut engine, id, mut proposal) = fixture();
         assert_eq!(
             engine.preview_proposal(&proposal).unwrap().status,
             ProposalStatus::Validated
@@ -690,7 +690,7 @@ mod tests {
 
     #[test]
     fn task_and_plan_draft_edits_save_new_revision_without_approval() {
-        let (_, mut engine, id, _) = fixture();
+        let (_dir, mut engine, id, _) = fixture();
         engine.approve_latest_brief(&id, 1).unwrap();
         let plan = PlanContent {
             milestones: vec![MilestoneSpec {

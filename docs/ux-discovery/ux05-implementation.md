@@ -18,6 +18,7 @@ Brief proposals now build the complete resulting brief without persistence and e
 New regression tests cover text edited after preview, target and project switches, discard, assistant proposal replacement, confirmation reset, complete and incomplete brief candidates, stale revisions, forged invalid Apply, and unchanged audit after rejection. The [Windows native interaction record](../evidence/ux05-review-native-smoke.md) documents actual UI actions, service snapshots and keyboard navigation.
 
 The first CI run on the pushed refinement exposed a Rust toolchain deprecation in the existing assistant worker counter under `-D warnings`. Its bounded reservation now uses a portable compare and exchange loop; this does not change chat permissions or worker limits.
+The next CI run reached the proposal tests and found that their temporary database directory was dropped before later writes on Unix. Each test now retains its fixture directory for the full test scope.
 
 ## Supported and restricted actions
 
