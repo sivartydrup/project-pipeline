@@ -1,0 +1,8 @@
+
+> test
+> node tests/smoke.cjs
+
+PASS project switching, distinct context, two-message history, drafts, proposal isolation, open-panel navigation, portfolio
+PASS working, pause requested, paused, resume, blocked, awaiting review, offline, ready; project state isolation
+PASS keyboard focus, Escape return, Enter project card, narrow drawer, light/dark themes
+PASS no browser page errors

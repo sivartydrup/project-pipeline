@@ -1,31 +1,130 @@
-/* All data and actions in this file are illustrative. No service calls or persistence. */
-const params = new URLSearchParams(location.search);
-const allowedViews = new Set([
-  "portfolio",
+/* Isolated interaction model: every record and action here is illustrative. */
+const projectData = {
+  northstar: {
+    id: "northstar",
+    name: "Northstar",
+    swatch: "teal",
+    stage: "Build",
+    goal: "Make teamwork feel lighter.",
+    description: "A shared planning space for small teams.",
+    portfolioDescription:
+      "A calmer way for small teams to plan and share their work.",
+    progress: 68,
+    accepted: "8 of 12 weighted outcomes accepted",
+    task: "Improve the first welcome",
+    reviewTitle: "A clearer first welcome.",
+    reviewOutcome: "New members can get started with confidence.",
+    reviewSummary:
+      "The first screen explains the workspace in plain language and offers a clear next step when there are no projects yet. Two interface files changed; no external service was touched.",
+    checks: [
+      "Welcome screen explains the next action",
+      "Existing onboarding path still works",
+      "Keyboard path reaches the primary action",
+    ],
+    risk: "Text at 200% scale needs native validation",
+    decision: "Choose whether guests can join without an account",
+    approvedWork: "Invite teammates",
+    before: "Core team planning, no billing work",
+    planRevision: 4,
+    roadmap: [
+      "Find the product direction",
+      "Make the core experience work",
+      "Prepare a reliable release",
+    ],
+  },
+  fieldnotes: {
+    id: "fieldnotes",
+    name: "Fieldnotes",
+    swatch: "violet",
+    stage: "Planning",
+    goal: "Turn research notes into useful insight.",
+    description: "A simple research journal for independent makers.",
+    portfolioDescription: "A simple research journal for independent makers.",
+    progress: 18,
+    accepted: "2 of 11 weighted outcomes accepted",
+    task: "Synthesize interview notes",
+    reviewTitle: "Research themes are ready.",
+    reviewOutcome: "The first audience patterns are easier to compare.",
+    reviewSummary:
+      "The agent grouped illustrative interview notes into themes and linked each finding to its source. No project files or external services were changed.",
+    checks: [
+      "Themes link to source notes",
+      "Uncertain findings are labeled",
+      "Summary remains editable",
+    ],
+    risk: "Two interview notes still need owner confirmation",
+    decision: "Confirm which audience segment comes first",
+    approvedWork: "Synthesize interview notes",
+    before: "Research journal plan, no billing work",
+    planRevision: 2,
+    roadmap: [
+      "Understand the audience",
+      "Shape the journal experience",
+      "Validate the first release",
+    ],
+  },
+};
+
+const projectViews = new Set([
   "overview",
   "roadmap",
   "review",
+  "design",
+  "releases",
+  "history",
+]);
+const allViews = new Set([
+  "portfolio",
   "projects",
   "inbox",
   "activity",
   "settings",
-  "design",
-  "releases",
-  "history",
   "new",
+  ...projectViews,
 ]);
-const allowedModes = new Set(["default", "working", "blocked", "offline"]);
+const runStates = [
+  "ready",
+  "working",
+  "pause_requested",
+  "paused",
+  "blocked",
+  "awaiting_review",
+  "offline",
+];
+const params = new URLSearchParams(location.search);
+const initialProject = projectData[params.get("project")]
+  ? params.get("project")
+  : "northstar";
 const state = {
-  view: allowedViews.has(params.get("view")) ? params.get("view") : "portfolio",
-  project: "Northstar",
+  view: allViews.has(params.get("view")) ? params.get("view") : "portfolio",
+  selectedProject: initialProject,
   theme: params.get("theme") === "dark" ? "dark" : "light",
-  assistant: params.get("assistant") === "open",
-  mode: allowedModes.has(params.get("mode")) ? params.get("mode") : "default",
-  prompt: params.get("proposal") === "open" ? "Add subscriptions" : "",
-  proposal: params.get("proposal") === "open",
-  simulatedApproval: false,
+  assistantOpen: params.get("assistant") === "open",
+  drafts: { portfolio: "", northstar: "", fieldnotes: "" },
+  conversations: { portfolio: [], northstar: [], fieldnotes: [] },
+  proposals: {},
+  nextProposal: 1,
+  projects: {
+    northstar: {
+      runState: "awaiting_review",
+      reviewPending: true,
+      reviewAccepted: false,
+    },
+    fieldnotes: {
+      runState: "ready",
+      reviewPending: false,
+      reviewAccepted: false,
+    },
+  },
+  notice: "",
 };
+if (runStates.includes(params.get("mode"))) {
+  state.projects[initialProject].runState = params.get("mode");
+  state.projects[initialProject].reviewPending =
+    params.get("mode") === "awaiting_review";
+}
 document.body.dataset.theme = state.theme;
+
 const $ = (selector) => document.querySelector(selector);
 const main = $("#main-content");
 const panel = $("#assistant-panel");
@@ -37,12 +136,39 @@ const escapeHtml = (value) =>
         char
       ],
   );
+const currentProject = () => projectData[state.selectedProject];
+const currentRun = () => state.projects[state.selectedProject];
+const contextKey = () =>
+  projectViews.has(state.view) ? state.selectedProject : "portfolio";
+const contextLabel = () =>
+  contextKey() === "portfolio"
+    ? "All projects"
+    : `${currentProject().name} · ${state.view === "review" ? "Work review" : state.view[0].toUpperCase() + state.view.slice(1)}`;
+const statusLabels = {
+  ready: "Ready",
+  working: "Working",
+  pause_requested: "Pause requested",
+  paused: "Paused",
+  blocked: "Blocked",
+  awaiting_review: "Awaiting review",
+  offline: "Offline",
+};
+const statusTypes = {
+  pause_requested: "warning",
+  paused: "neutral",
+  blocked: "warning",
+  awaiting_review: "warning",
+  offline: "error",
+};
 const pill = (label, type = "") =>
   `<span class="status-pill ${type}"><span class="tiny-dot"></span>${label}</span>`;
-const btn = (label, action, variant = "secondary-btn") =>
-  `<button class="${variant}" data-action="${action}">${label}</button>`;
+const statePill = (run) =>
+  pill(statusLabels[run.runState], statusTypes[run.runState] || "");
+const btn = (label, action, variant = "secondary-btn", projectId = "") =>
+  `<button class="${variant}" data-action="${action}" ${projectId ? `data-project="${projectId}"` : ""}>${label}</button>`;
+const sample = pill("Illustrative example", "neutral");
 const projectTabs = (active) =>
-  `<nav class="project-tabs" aria-label="Project sections">${[
+  `<nav class="project-tabs" aria-label="${currentProject().name} sections">${[
     ["overview", "Overview"],
     ["roadmap", "Roadmap"],
     ["review", "Work"],
@@ -55,194 +181,376 @@ const projectTabs = (active) =>
         `<button data-view="${id}" class="${active === id ? "active" : ""}" ${active === id ? 'aria-current="page"' : ""}>${label}</button>`,
     )
     .join("")}</nav>`;
-const sample = `<span class="status-pill neutral">Illustrative example</span>`;
+const projectProgress = (id) =>
+  projectData[id].progress + (state.projects[id].reviewAccepted ? 4 : 0);
+const activeTask = (project, run) =>
+  run.reviewAccepted && run.runState === "ready"
+    ? project.approvedWork
+    : project.task;
+const acceptedSummary = (project) =>
+  state.projects[project.id].reviewAccepted
+    ? project.id === "northstar"
+      ? "9 of 12 weighted outcomes accepted"
+      : "3 of 11 weighted outcomes accepted"
+    : project.accepted;
 
-function portfolio() {
-  return `<div class="main-inner"><div class="page-head"><div><div class="overline">MONDAY, 12 OCTOBER</div><h1 class="page-title">Good morning, Studio owner.</h1><p class="page-subtitle">Here’s where your products stand, and what needs you today.</p></div>${btn("＋ New project", "new", "primary-btn")}</div><div class="card focus-card"><div class="focus-icon">✧</div><div class="focus-copy"><div class="overline">YOUR FOCUS TODAY</div><h2>Review Northstar’s latest work</h2><p>The agent finished improving onboarding. All required checks passed, and the work is ready for your decision.</p></div>${btn("Review work ↗", "review", "primary-btn")}</div><div class="section-head"><h2>Your projects</h2><button data-action="projects">View all projects →</button></div><div class="project-grid"><article class="card project-card" data-action="overview" tabindex="0" role="button" aria-label="Open Northstar"><div class="project-card-head"><span class="project-swatch teal"></span><h3>Northstar</h3>${pill("Review ready")}</div><p>A calmer way for small teams to plan and share their work.</p><div class="progress-track"><div class="progress-fill" style="width:68%"></div></div><div class="project-card-foot"><span>68% verified progress</span><span>Build stage · 1 item needs you</span></div></article><article class="card project-card" data-action="overview" tabindex="0" role="button" aria-label="Open Fieldnotes"><div class="project-card-head"><span class="project-swatch violet"></span><h3>Fieldnotes</h3>${pill("Planning", "neutral")}</div><p>A simple research journal for independent makers.</p><div class="progress-track"><div class="progress-fill" style="width:18%"></div></div><div class="project-card-foot"><span>18% verified progress</span><span>Plan ready to review</span></div></article></div><div class="section-head"><h2>Needs your attention <span style="color:var(--muted);font-weight:500">(2)</span></h2><button data-action="inbox">Open inbox →</button></div><div class="card attention-row"><div class="attention-icon">✓</div><div><strong>Northstar · Review onboarding update</strong><small>Accept the result or ask for changes. 3 checks passed.</small></div>${btn("Review", "review")}</div><div class="card attention-row"><div class="attention-icon">◇</div><div><strong>Fieldnotes · Confirm the product direction</strong><small>A draft plan is waiting for your review.</small></div>${btn("Open", "overview")}</div></div>`;
+function recommendation(project, run) {
+  if (run.runState === "working")
+    return {
+      title: `Follow current work on ${project.name}`,
+      reason: `The approved task, ${project.task.toLowerCase()}, is running within its current limits. It still needs review after submission.`,
+      action: "View current work",
+      target: "overview",
+    };
+  if (run.runState === "pause_requested")
+    return {
+      title: "Let this task finish, then pause",
+      reason:
+        "The current approved task continues. No new task will start after it finishes; pausing does not accept or reject the result.",
+      action: "View current work",
+      target: "overview",
+    };
+  if (run.runState === "paused")
+    return {
+      title: run.reviewPending
+        ? "Review saved work while automation is paused"
+        : "Resume eligible work when ready",
+      reason: run.reviewPending
+        ? "The finished task awaits your decision. Automatic continuation remains off."
+        : "No task is running. Resume will recheck approvals, dependencies, permissions, provider and limits.",
+      action: run.reviewPending ? "Review work" : "Resume eligible work",
+      target: run.reviewPending ? "review" : "resume",
+    };
+  if (run.runState === "blocked")
+    return {
+      title: project.decision,
+      reason:
+        "An unresolved product decision prevents this work from continuing. Saved work is preserved.",
+      action: "Review decision",
+      target: "inbox",
+    };
+  if (run.runState === "awaiting_review")
+    return {
+      title:
+        project.id === "northstar"
+          ? "Review the onboarding update"
+          : "Review the research themes",
+      reason:
+        "The agent submitted work with illustrative checks. Your acceptance is required before it counts as verified progress.",
+      action: "Review work",
+      target: "review",
+    };
+  if (run.runState === "offline")
+    return {
+      title: run.reviewPending
+        ? "Review saved work while the provider is offline"
+        : "Continue planning while the provider is offline",
+      reason:
+        "Project records remain available locally. New agent work cannot start while the configured provider is unavailable.",
+      action: run.reviewPending ? "Review saved work" : "Open saved plan",
+      target: run.reviewPending ? "review" : "roadmap",
+    };
+  if (run.reviewPending)
+    return {
+      title: `Review ${project.task.toLowerCase()}`,
+      reason:
+        "A submitted result still needs owner acceptance. Other approved, eligible work may start only after a fresh policy check.",
+      action: "Review work",
+      target: "review",
+    };
+  return {
+    title: `Start approved work: ${activeTask(project, run)}`,
+    reason:
+      "This illustrative task is approved, ready and unblocked. Guided Auto may start eligible work only after rechecking provider/model authorization, limits, permissions and dependencies.",
+    action: "Start approved task",
+    target: "start",
+  };
+}
+
+function projectCard(project) {
+  const run = state.projects[project.id];
+  const progress = projectProgress(project.id);
+  return `<article class="card project-card" data-view="overview" data-project="${project.id}" tabindex="0" role="button" aria-label="Open ${project.name}"><div class="project-card-head"><span class="project-swatch ${project.swatch}"></span><h3>${project.name}</h3>${statePill(run)}</div><p>${project.portfolioDescription}</p><div class="progress-track"><div class="progress-fill" style="width:${progress}%"></div></div><div class="project-card-foot"><span>${progress}% verified progress</span><span>${project.stage} stage · ${statusLabels[run.runState]}</span></div></article>`;
+}
+
+function portfolio(showFocus = true) {
+  const prioritized = ["northstar", "fieldnotes"].sort((a, b) => {
+    const priority = {
+      awaiting_review: 0,
+      blocked: 1,
+      pause_requested: 2,
+      working: 3,
+      offline: 4,
+      paused: 5,
+      ready: 6,
+    };
+    return (
+      priority[state.projects[a].runState] -
+      priority[state.projects[b].runState]
+    );
+  });
+  const focusProject = projectData[prioritized[0]];
+  const focus = recommendation(focusProject, state.projects[focusProject.id]);
+  return `<div class="main-inner"><div class="page-head"><div><div class="overline">ILLUSTRATIVE STUDIO · 12 OCTOBER</div><h1 class="page-title">${showFocus ? "Good morning, Studio owner." : "Your projects"}</h1><p class="page-subtitle">${showFocus ? "Here’s where your products stand, and what needs you today." : "Choose a project to see its own goal, progress and next action."}</p></div>${btn("＋ New project", "new", "primary-btn")}</div>${showFocus ? `<div class="card focus-card"><div class="focus-icon">✧</div><div class="focus-copy"><div class="overline">YOUR FOCUS TODAY · ${focusProject.name.toUpperCase()}</div><h2>${focus.title}</h2><p>${focus.reason}</p></div>${btn(`${focus.action} ↗`, focus.target, "primary-btn", focusProject.id)}</div>` : ""}<div class="section-head"><h2>Your projects</h2><button data-action="projects">View all projects →</button></div><div class="project-grid">${Object.values(projectData).map(projectCard).join("")}</div>${showFocus ? `<div class="section-head"><h2>Needs your attention</h2><button data-action="inbox">Open inbox →</button></div><div class="card attention-row"><div class="attention-icon">✓</div><div><strong>Northstar · ${recommendation(projectData.northstar, state.projects.northstar).title}</strong><small>${statusLabels[state.projects.northstar.runState]} · ${projectData.northstar.stage} stage</small></div>${btn("Open", "overview", "secondary-btn", "northstar")}</div><div class="card attention-row"><div class="attention-icon">◇</div><div><strong>Fieldnotes · ${recommendation(projectData.fieldnotes, state.projects.fieldnotes).title}</strong><small>${statusLabels[state.projects.fieldnotes.runState]} · ${projectData.fieldnotes.stage} stage</small></div>${btn("Open", "overview", "secondary-btn", "fieldnotes")}</div>` : ""}</div>`;
+}
+
+function runActions(project, run) {
+  if (run.runState === "working")
+    return `${btn("Pause after task", "pause-after")}${btn("Pause now", "pause-now")}${btn("Finish current task", "finish-task", "text-btn")}`;
+  if (run.runState === "pause_requested")
+    return `${btn("Cancel pause request", "cancel-pause")}${btn("Pause now", "pause-now")}${btn("Finish current task", "finish-task", "text-btn")}`;
+  if (run.runState === "paused")
+    return `${btn("Resume eligible work", "resume", "primary-btn")}${run.reviewPending ? btn("Review pending work", "review") : ""}`;
+  if (run.runState === "ready")
+    return `${btn("Start approved task", "start", "primary-btn")}${run.reviewPending ? btn("Review pending work", "review") : ""}`;
+  if (run.runState === "awaiting_review")
+    return btn("Review result", "review", "primary-btn");
+  if (run.runState === "blocked")
+    return btn("Review decision", "inbox", "primary-btn");
+  return btn("Open settings", "settings", "primary-btn");
 }
 
 function overview() {
-  const mode = state.mode;
-  const working = mode === "working";
-  const blocked = mode === "blocked";
-  const offline = mode === "offline";
-  const status = working
-    ? pill("Working")
-    : blocked
-      ? pill("Blocked", "warning")
-      : offline
-        ? pill("Offline", "error")
-        : pill("Review ready");
-  return `<div class="main-inner"><div class="page-head"><div><div class="overline">PROJECT / NORTHSTAR</div><h1 class="page-title">Make teamwork feel lighter.</h1><p class="page-subtitle">Northstar is a shared planning space for small teams. ${sample}</p></div>${status}</div>${projectTabs("overview")}<div class="state-controls"><label for="state-select">Preview state</label><select id="state-select" aria-label="Preview project state"><option value="default" ${mode === "default" ? "selected" : ""}>Review ready</option><option value="working" ${working ? "selected" : ""}>Agent working</option><option value="blocked" ${blocked ? "selected" : ""}>Blocked</option><option value="offline" ${offline ? "selected" : ""}>Provider offline</option></select></div>${blocked ? `<div class="card recovery"><h3>Work is blocked by a decision</h3><p>The agent needs you to choose whether guests can join without an account. Its partial changes are preserved. Other approved tasks can still proceed.</p>${btn("Review decision", "inbox", "primary-btn")} ${btn("See preserved work", "review")}</div>` : offline ? `<div class="card recovery"><h3>AI provider unavailable</h3><p>Your project records remain available. The assistant can explain saved status, but it cannot run or generate new work until a provider is configured and reachable.</p>${btn("Open settings", "settings", "primary-btn")} ${btn("Review saved work", "review")}</div>` : ""}<div class="overview-grid" style="margin-top:${blocked || offline ? "17" : "0"}px"><div class="card next-card"><div class="overline">RECOMMENDED NEXT STEP</div><h2>${working ? "Let the current task finish" : blocked ? "Resolve the guest access decision" : offline ? "Review work already saved" : "Review the onboarding update"}</h2><p>${working ? "The agent is updating the welcome flow under the approved plan. You can inspect progress or pause safely. Completion is only recorded after your review." : blocked ? "This choice changes the onboarding experience. Review the recommendation, alternatives, and impact before work resumes." : offline ? "Three completed checks and the submitted changes are stored locally. Review them while the provider connection is unavailable." : "The agent submitted a clearer first-run experience. Required checks passed, and your acceptance is needed before this task counts toward verified progress."}</p><div class="button-row">${btn(working ? "View live work" : blocked ? "Review decision" : "Review work", working ? "working" : blocked ? "inbox" : "review", "primary-btn")}${btn("See other options", "roadmap")}</div></div><div class="card aside-card"><div class="overline">VERIFIED PROGRESS</div><div class="metric-line"><strong>68%</strong><span>of approved work accepted</span></div><div class="progress-track"><div class="progress-fill" style="width:68%"></div></div><p style="margin-top:15px">8 of 12 weighted outcomes accepted. The submitted update is still awaiting your review.</p></div></div><div class="section-head"><h2>Where you are</h2><button data-action="roadmap">View roadmap →</button></div><div class="card journey"><div class="journey-step done">Discover</div><div class="journey-step done">Plan</div><div class="journey-step current">Build</div><div class="journey-step">Release</div><div class="journey-step">Operate</div></div><div class="section-head"><h2>Current activity</h2><button data-action="review">View all work →</button></div><div class="card run-card"><div class="run-top"><span class="focus-icon" style="width:34px;height:34px;font-size:16px">${working ? "◌" : "✓"}</span><strong>${working ? "Agent updating onboarding" : "Onboarding update submitted"}</strong>${working ? pill("Working") : pill("Waiting for review", "warning")}</div><p>${working ? "The agent is improving the first welcome screen. Last verified event: source edits saved. Checks have not finished." : "A clearer welcome path and helpful empty state are ready. The agent cannot accept its own work."}</p><div class="run-bottom"><span>${working ? "OpenCode · model call 7 of 30 · 4m elapsed" : "3 checks passed · 2 files changed"}</span>${btn(working ? "Pause after task" : "Review result", working ? "pause" : "review")}</div></div></div>`;
+  const project = currentProject();
+  const run = currentRun();
+  const rec = recommendation(project, run);
+  const progress = projectProgress(project.id);
+  const notice =
+    run.runState === "blocked"
+      ? `<div class="card recovery"><h3>Work is blocked by a decision</h3><p>${project.decision}. The affected work is preserved; other approved tasks can proceed if policy permits.</p>${btn("Review decision", "inbox", "primary-btn")}</div>`
+      : run.runState === "offline"
+        ? `<div class="card recovery"><h3>Configured provider unavailable</h3><p>Saved project records are still available. Deterministic guidance and manual review continue; no new agent run is implied.</p>${btn("Open settings", "settings", "primary-btn")}</div>`
+        : run.runState === "paused"
+          ? `<div class="card recovery"><h3>Automatic continuation is paused</h3><p>No new task will start. ${run.reviewPending ? "A submitted result still needs your review." : "Partial work and evidence remain saved."} Resume performs a fresh eligibility and safety check.</p>${runActions(project, run)}</div>`
+          : "";
+  return `<div class="main-inner"><div class="page-head"><div><div class="overline">PROJECT / ${project.name.toUpperCase()}</div><h1 class="page-title">${project.goal}</h1><p class="page-subtitle">${project.description} ${sample}</p></div>${statePill(run)}</div>${projectTabs("overview")}<div class="state-controls"><label for="state-select">Preview state</label><select id="state-select" aria-label="Preview ${project.name} automation state">${runStates.map((value) => `<option value="${value}" ${run.runState === value ? "selected" : ""}>${statusLabels[value]}</option>`).join("")}</select></div>${notice}<div class="overview-grid" style="margin-top:${notice ? "17" : "0"}px"><div class="card next-card"><div class="overline">RECOMMENDED NEXT STEP</div><h2>${rec.title}</h2><p>${rec.reason}</p><div class="button-row">${btn(rec.action, rec.target, "primary-btn")}${btn("See other options", "roadmap")}</div></div><div class="card aside-card"><div class="overline">VERIFIED PROGRESS</div><div class="metric-line"><strong>${progress}%</strong><span>of approved work accepted</span></div><div class="progress-track"><div class="progress-fill" style="width:${progress}%"></div></div><p style="margin-top:15px">${acceptedSummary(project)}. ${run.reviewPending ? "Submitted work still awaits owner acceptance." : "Only accepted outcomes count."}</p></div></div><div class="section-head"><h2>Where you are</h2><button data-action="roadmap">View roadmap →</button></div><div class="card journey">${["Discover", "Plan", "Build", "Release", "Operate"].map((stage, index) => `<div class="journey-step ${index < (project.stage === "Build" ? 2 : 1) ? "done" : stage === (project.stage === "Planning" ? "Plan" : project.stage) ? "current" : ""}">${stage}</div>`).join("")}</div><div class="section-head"><h2>Current activity</h2><button data-action="review">View work →</button></div><div class="card run-card"><div class="run-top"><span class="focus-icon" style="width:34px;height:34px;font-size:16px">${["working", "pause_requested"].includes(run.runState) ? "◌" : "✓"}</span><strong>${activeTask(project, run)}</strong>${statePill(run)}</div><p>${run.runState === "working" ? "The approved task is actively running. Last verified event: source edits saved; checks have not finished." : run.runState === "pause_requested" ? "The current task continues. No new task will start when it ends; the result will still need review." : run.runState === "paused" ? "Automatic continuation is off. Saved work remains available for review or a safe resume." : run.runState === "awaiting_review" ? "The agent submitted its result. It cannot accept its own work." : run.runState === "ready" ? "Approved work is eligible. Starting still requires a fresh preflight." : run.runState === "blocked" ? "An unresolved decision prevents this task from progressing." : "The provider is unavailable; no task is running."}</p><div class="run-bottom"><span>${["working", "pause_requested"].includes(run.runState) ? "OpenCode · model call 7 of 30 · 4m elapsed" : run.reviewPending ? "3 illustrative checks passed · owner review pending" : "Project state saved locally"}</span><div class="run-buttons">${runActions(project, run)}</div></div></div></div>`;
 }
 
 function review() {
-  return `<div class="main-inner"><div class="page-head"><div><div class="overline">NORTHSTAR / WORK REVIEW</div><h1 class="page-title">A clearer first welcome.</h1><p class="page-subtitle">Submitted by the agent · awaiting your review · ${sample}</p></div>${pill("Review ready")}</div>${projectTabs("review")}<div class="review-layout"><div class="card review-main"><div class="overline">WHAT CHANGED</div><h2>New members can get started with confidence.</h2><p>The first screen now explains the workspace in plain language and offers a clear next step when there are no projects yet. Two interface files changed; no external service was touched.</p><div class="section-head"><h2>Outcome checks</h2></div><ul class="check-list"><li><span class="check-mark">✓</span><div>Welcome screen explains the next action<small>Verified with screenshot and UI review.</small></div></li><li><span class="check-mark">✓</span><div>Existing onboarding path still works<small>Automated journey passed.</small></div></li><li><span class="check-mark">✓</span><div>Keyboard path reaches the primary action<small>Manual keyboard check recorded.</small></div></li></ul><details><summary>See technical details and diff</summary><p>Illustrative diff: onboarding screen copy and empty-state layout. In production, exact revision, file diff, run IDs, logs and hashes appear here.</p></details><div class="review-actions">${btn(state.simulatedApproval ? "Example marked accepted" : "Accept work", "accept", "primary-btn")}${btn("Request changes", "request")}</div><p style="margin-top:12px;font-size:11px">Accept calls the exact task-revision domain service after evidence checks. This prototype only changes its display.</p></div><aside class="card review-side"><h3>Evidence at a glance</h3><div class="evidence-item"><strong>Automated checks</strong><small>3 passed · 0 failed</small></div><div class="evidence-item"><strong>Change preview</strong><small>2 interface files · 18 additions · 6 removals</small></div><div class="evidence-item"><strong>Agent submission</strong><small>Complete; agent acceptance is not allowed</small></div><div class="evidence-item"><strong>Known risk</strong><small>Text at 200% scale needs native validation</small></div><div class="callout">After acceptance, the coordinator checks dependencies, approvals, provider limits and policy again before starting another eligible task.</div></aside></div></div>`;
+  const project = currentProject();
+  const run = currentRun();
+  if (!run.reviewPending && !run.reviewAccepted)
+    return `<div class="main-inner"><div class="page-head"><div><div class="overline">${project.name.toUpperCase()} / WORK</div><h1 class="page-title">No work awaiting review.</h1><p class="page-subtitle">${project.task} is ${statusLabels[run.runState].toLowerCase()}. ${sample}</p></div></div>${projectTabs("review")}<div class="card simple-panel"><h2>Review begins after submission</h2><p>An agent result must include outcome checks and evidence. It cannot accept itself. You can return to the project overview for its current state.</p>${btn("Back to overview", "overview", "primary-btn")}</div></div>`;
+  return `<div class="main-inner"><div class="page-head"><div><div class="overline">${project.name.toUpperCase()} / WORK REVIEW</div><h1 class="page-title">${project.reviewTitle}</h1><p class="page-subtitle">${run.reviewAccepted ? "Illustratively accepted by owner" : "Submitted by the agent · awaiting your review"} · ${sample}</p></div>${pill(run.reviewAccepted ? "Accepted" : "Awaiting review", run.reviewAccepted ? "" : "warning")}</div>${projectTabs("review")}<div class="review-layout"><div class="card review-main"><div class="overline">WHAT CHANGED</div><h2>${project.reviewOutcome}</h2><p>${project.reviewSummary}</p><div class="section-head"><h2>Outcome checks</h2></div><ul class="check-list">${project.checks.map((check) => `<li><span class="check-mark">✓</span><div>${check}<small>Illustrative evidence available for owner inspection.</small></div></li>`).join("")}</ul><details><summary>See technical details and diff</summary><p>Illustrative diff and run details for ${project.name}. In production, exact revision, file diff, run IDs, logs and hashes appear here.</p></details><div class="review-actions">${run.reviewAccepted ? pill("Owner accepted this example") : `${btn("Accept work", "accept", "primary-btn")}${btn("Request changes", "request")}`}</div><p style="margin-top:12px;font-size:11px">The real product would call the exact task-revision domain service after evidence checks. This prototype changes display state only.</p></div><aside class="card review-side"><h3>Evidence at a glance</h3><div class="evidence-item"><strong>Outcome checks</strong><small>${project.checks.length} illustrative checks passed</small></div><div class="evidence-item"><strong>Change preview</strong><small>${project.id === "northstar" ? "2 interface files" : "Research notes and theme summary"}</small></div><div class="evidence-item"><strong>Agent submission</strong><small>Complete; agent acceptance is not allowed</small></div><div class="evidence-item"><strong>Known risk</strong><small>${project.risk}</small></div><div class="callout">After acceptance, the coordinator rechecks approvals, dependencies, permissions, provider and limits before any eligible work continues.</div></aside></div></div>`;
 }
 
 function roadmap() {
-  return `<div class="main-inner"><div class="page-head"><div><div class="overline">NORTHSTAR / ROADMAP</div><h1 class="page-title">A clear path forward.</h1><p class="page-subtitle">Only approved scope contributes to verified progress. ${sample}</p></div>${btn("Suggest a change", "proposal", "primary-btn")}</div>${projectTabs("roadmap")}<div class="card roadmap-row"><span class="roadmap-index">01</span><div><strong>Find the product direction</strong><small>Audience, problem and brief approved</small></div>${pill("Complete")}</div><div class="card roadmap-row"><span class="roadmap-index">02</span><div><strong>Make the core experience work</strong><small>8 of 12 weighted outcomes accepted · onboarding awaits review</small></div>${pill("In progress")}</div><div class="card roadmap-row"><span class="roadmap-index">03</span><div><strong>Prepare a reliable release</strong><small>Blocked until core outcomes and checks are accepted</small></div>${pill("Upcoming", "neutral")}</div><div class="section-head"><h2>Next approved work</h2></div><div class="card simple-panel"><h2>Invite teammates</h2><p>This task is ready when onboarding review is resolved. A proposed new subscription flow would be a separate scope revision and requires owner approval.</p>${btn("Ask about dependencies", "ask-next")}</div></div>`;
+  const project = currentProject();
+  const run = currentRun();
+  return `<div class="main-inner"><div class="page-head"><div><div class="overline">${project.name.toUpperCase()} / ROADMAP</div><h1 class="page-title">A clear path forward.</h1><p class="page-subtitle">Only accepted work in approved scope contributes to progress. ${sample}</p></div>${btn("Suggest a change", "proposal", "primary-btn")}</div>${projectTabs("roadmap")}${project.roadmap.map((title, index) => `<div class="card roadmap-row"><span class="roadmap-index">0${index + 1}</span><div><strong>${title}</strong><small>${index === 0 ? "Approved direction and evidence saved" : index === 1 ? `${acceptedSummary(project)} · ${statusLabels[run.runState]}` : "Upcoming after prerequisites are accepted"}</small></div>${pill(index === 0 ? "Complete" : index === 1 ? "In progress" : "Upcoming", index === 2 ? "neutral" : "")}</div>`).join("")}<div class="section-head"><h2>Next approved work</h2></div><div class="card simple-panel"><h2>${project.approvedWork}</h2><p>${recommendation(project, run).reason} A proposed subscription flow would be a separate scope revision requiring owner approval.</p>${btn("Ask about this work", "ask-next")}</div></div>`;
 }
 
 function generic(view) {
-  const content = {
-    projects: [
-      "All projects",
-      "Choose a project to see its goal, progress and next action.",
-    ],
-    inbox: [
-      "Needs your attention",
-      "Two illustrative items need an owner decision.",
-    ],
+  if (view === "projects") return portfolio(false);
+  if (view === "inbox")
+    return `<div class="main-inner"><div class="page-head"><div><div class="overline">ALL PROJECTS</div><h1 class="page-title">Needs your attention</h1><p class="page-subtitle">Illustrative project-specific requests and work states.</p></div></div>${Object.values(
+      projectData,
+    )
+      .map(
+        (project) =>
+          `<div class="card attention-row"><div class="attention-icon">◇</div><div><strong>${project.name} · ${recommendation(project, state.projects[project.id]).title}</strong><small>${project.stage} · ${statusLabels[state.projects[project.id].runState]}</small></div>${btn("Open project", "overview", "secondary-btn", project.id)}</div>`,
+      )
+      .join("")}</div>`;
+  const project = currentProject();
+  const global = !projectViews.has(view);
+  const titles = {
     activity: [
       "Recent activity",
-      "See what changed, what was verified, and what remains open.",
+      "Illustrative activity across both projects remains separated by project.",
     ],
     settings: [
       "Autonomy and settings",
-      "Guided Auto prepares recommendations and may continue approved eligible work within enforceable limits. External effects still need scoped approval.",
-    ],
-    design: [
-      "Design",
-      "Flows, visual review and accessibility evidence remain linked to approved work.",
-    ],
-    releases: [
-      "Releases",
-      "Release readiness and publication remain separate owner decisions.",
-    ],
-    history: [
-      "History",
-      "Every approval, run and outcome keeps its original record.",
+      "Guided Auto may continue approved eligible work after a fresh safety check. External effects still need scoped approval.",
     ],
     new: [
       "Start with an idea",
-      "Describe what you want to make. The assistant would ask for essential context and prepare a brief for review.",
+      "Describe what you want to make; a draft brief would be previewed before approval.",
     ],
-  }[view] || ["Workspace", "Choose an action to continue."];
-  return `<div class="main-inner"><div class="page-head"><div><div class="overline">${view === "new" ? "NEW PROJECT" : "PROJECT PIPELINE"}</div><h1 class="page-title">${content[0]}</h1><p class="page-subtitle">${content[1]} ${sample}</p></div></div>${["design", "releases", "history"].includes(view) ? projectTabs(view) : ""}<div class="card simple-panel"><div class="empty-illustration">✧</div><h2>${view === "new" ? "What are you hoping to create?" : content[0]}</h2><p>${view === "new" ? "Use the prompt bar below. In the product, a draft brief would be previewed before it is saved or approved." : "This conceptual screen demonstrates the navigation position; detailed interaction belongs to the later UX backlog."}</p>${view === "new" ? btn("Describe an idea", "focus-composer", "primary-btn") : btn("Back to overview", "overview")}</div></div>`;
+    design: [
+      "Design",
+      `${project.name} design evidence stays linked to its approved work.`,
+    ],
+    releases: [
+      "Releases",
+      `${project.name} release readiness and publication require separate owner decisions.`,
+    ],
+    history: [
+      "History",
+      `${project.name} approvals, runs and outcomes keep their original records.`,
+    ],
+  };
+  const [title, subtitle] = titles[view] || [
+    "Workspace",
+    "Choose an action to continue.",
+  ];
+  return `<div class="main-inner"><div class="page-head"><div><div class="overline">${global ? "PROJECT PIPELINE" : project.name.toUpperCase()}</div><h1 class="page-title">${title}</h1><p class="page-subtitle">${subtitle} ${sample}</p></div></div>${global ? "" : projectTabs(view)}<div class="card simple-panel"><div class="empty-illustration">✧</div><h2>${view === "new" ? "What are you hoping to create?" : title}</h2><p>${view === "new" ? "Use the prompt bar below. This design phase does not save or approve a real brief." : "This conceptual screen preserves the selected context; detailed workflow belongs to later UX implementation."}</p>${btn(view === "new" ? "Describe an idea" : global ? "Back to portfolio" : "Back to overview", view === "new" ? "focus-composer" : global ? "portfolio" : "overview", "primary-btn")}</div></div>`;
+}
+
+function proposalCard(proposal) {
+  return `<div class="proposal-card" data-proposal-id="${proposal.id}"><div class="overline">PROPOSED CHANGE · DRAFT ONLY</div><h3>${escapeHtml(proposal.title)}</h3><p>Project: <strong>${proposal.projectName}</strong> · prepared from ${proposal.screen} · target: task plan · expected revision ${proposal.expectedRevision} · medium risk. This preview cannot change approved scope.</p><div class="proposal-diff"><div><strong>Before</strong>${proposal.before}</div><div><strong>Proposed</strong>${proposal.after}</div></div><ul><li>Review revised direction and plan before approval.</li><li>New work cannot be scheduled before exact-revision approval.</li><li>Discarding this preview leaves current scope unchanged.</li></ul>${btn("Refine proposal", "focus-panel")}${btn("Review proposed scope", "review-proposal", "primary-btn", proposal.projectId)}</div>`;
 }
 
 function assistant() {
-  const context =
-    state.view === "portfolio"
-      ? "All projects"
-      : `Northstar · ${state.view === "review" ? "Onboarding review" : state.view === "roadmap" ? "Roadmap" : "Overview"}`;
-  const prompt = state.prompt;
-  return `<span class="context-chip">◈ Context: ${context}</span><div class="assistant-message"><div class="message-label">ASSISTANT · ILLUSTRATIVE</div><div class="bubble">I can explain what needs attention, compare options, and prepare a change for your review. I use saved project records as context; I cannot authorize work from chat text.</div></div>${prompt ? `<div class="assistant-message user"><div class="message-label">YOU</div><div class="bubble">${escapeHtml(prompt)}</div></div><div class="assistant-message"><div class="message-label">ASSISTANT · SAMPLE RESPONSE</div><div class="bubble">${state.proposal ? "I can prepare this as a proposed roadmap change. Here is the exact preview; approved scope stays as it is until you review and approve a new revision." : "The next useful step is to review the onboarding update. The agent submitted it with three passing checks, but it still needs your acceptance. I can also show why the next task is waiting."}</div></div>` : ""}${state.proposal ? `<div class="proposal-card"><div class="overline">PROPOSED CHANGE · DRAFT ONLY</div><h3>Add subscription billing to Northstar</h3><p>Target: task plan · expected revision 4 · medium risk. Assumption: monthly team plan. No existing approved work is changed by this preview.</p><div class="proposal-diff"><div><strong>Before</strong>Core team planning, no billing work</div><div><strong>Proposed</strong>New billing discovery and implementation milestone</div></div><ul><li>Requires your review of the revised brief and plan.</li><li>New scope is not scheduled until exact-revision approval.</li><li>Can be discarded without changing the current plan.</li></ul>${btn("Refine proposal", "focus-panel")}${btn("Review proposed scope", "proposal-review", "primary-btn")}</div>` : ""}<div class="suggested"><button data-action="ask-next">What should I do next?</button><button data-action="proposal">Add subscriptions</button><button data-action="offline">What if the provider is offline?</button></div>`;
+  const key = contextKey();
+  const messages = state.conversations[key];
+  const welcome =
+    key === "portfolio"
+      ? "I can summarize the illustrative portfolio. Choose a project before proposing a change to its plan."
+      : `I can explain ${currentProject().name}’s saved state, compare options, and prepare a project-specific draft for review. Conversation text cannot authorize work.`;
+  return `<span class="context-chip">◈ Context: ${escapeHtml(contextLabel())}</span><div class="assistant-message"><div class="message-label">ASSISTANT · DEMONSTRATION</div><div class="bubble">${welcome}</div></div>${messages.map((message) => `<div class="assistant-message ${message.role === "user" ? "user" : ""}"><div class="message-label">${message.role === "user" ? "YOU" : "ASSISTANT · SIMULATED"}</div><div class="bubble">${escapeHtml(message.text)}</div>${message.proposalId ? proposalCard(state.proposals[message.proposalId]) : ""}</div>`).join("")}<div class="suggested"><button data-action="ask-next">What should I do next?</button><button data-action="proposal">Add subscriptions</button><button data-action="ask-offline">What if the provider is offline?</button></div>`;
 }
 
 function render() {
+  const view = state.view;
   main.innerHTML =
-    state.view === "portfolio"
+    view === "portfolio"
       ? portfolio()
-      : state.view === "overview"
+      : view === "overview"
         ? overview()
-        : state.view === "review"
+        : view === "review"
           ? review()
-          : state.view === "roadmap"
+          : view === "roadmap"
             ? roadmap()
-            : generic(state.view);
-  $("#breadcrumb").innerHTML =
-    state.view === "portfolio"
-      ? "Workspace <span>/</span> Home"
-      : `Workspace <span>/</span> ${["projects", "inbox", "activity", "settings", "new"].includes(state.view) ? state.view[0].toUpperCase() + state.view.slice(1) : `Northstar <span>/</span> ${state.view[0].toUpperCase() + state.view.slice(1)}`}`;
+            : generic(view);
+  const project = currentProject();
+  $("#breadcrumb").innerHTML = projectViews.has(view)
+    ? `Workspace <span>/</span> ${project.name} <span>/</span> ${view === "review" ? "Work" : view[0].toUpperCase() + view.slice(1)}`
+    : `Workspace <span>/</span> ${view === "portfolio" ? "Home" : view[0].toUpperCase() + view.slice(1)}`;
   document
     .querySelectorAll(".nav-item[data-view]")
-    .forEach((el) =>
-      el.classList.toggle("active", el.dataset.view === state.view),
+    .forEach((item) =>
+      item.classList.toggle(
+        "active",
+        (view === "portfolio" ? "portfolio" : view) === item.dataset.view,
+      ),
     );
-  document.querySelector(".project-link small").textContent =
-    state.mode === "working"
-      ? "Working"
-      : state.mode === "blocked"
-        ? "Blocked"
-        : state.mode === "offline"
-          ? "Offline"
-          : "Review";
+  document.querySelectorAll(".project-link[data-project]").forEach((item) => {
+    const id = item.dataset.project;
+    item.querySelector("small").textContent =
+      statusLabels[state.projects[id].runState];
+    item.classList.toggle(
+      "active-project",
+      projectViews.has(view) && id === state.selectedProject,
+    );
+  });
   $("#theme-toggle").textContent = state.theme === "light" ? "☾" : "☀";
   $("#theme-toggle").setAttribute(
     "aria-label",
     `Switch to ${state.theme === "light" ? "dark" : "light"} theme`,
   );
-  panel.hidden = !state.assistant;
-  $("#assistant-toggle").setAttribute("aria-expanded", String(state.assistant));
+  $("#global-context").textContent =
+    contextKey() === "portfolio" ? "All projects" : project.name;
+  $("#global-input").value = state.drafts[contextKey()];
+  $("#panel-input").value = state.drafts[contextKey()];
+  $("#panel-input").placeholder =
+    `Ask about ${contextKey() === "portfolio" ? "your projects" : project.name}…`;
+  panel.hidden = !state.assistantOpen;
+  $("#assistant-toggle").setAttribute(
+    "aria-expanded",
+    String(state.assistantOpen),
+  );
   $("#assistant-content").innerHTML = assistant();
+  $("#demo-notice").hidden = !state.notice;
+  $("#demo-notice").textContent = state.notice;
 }
-function navigate(view) {
+
+function navigate(view, projectId) {
+  if (projectId && projectData[projectId]) state.selectedProject = projectId;
   state.view = view;
-  if (view === "overview" || view === "portfolio") state.mode = "default";
+  state.notice = "";
   render();
   main.scrollTop = 0;
   main.focus({ preventScroll: true });
 }
-function openAssistant(focus = true) {
-  state.assistant = true;
+
+function sendMessage(text) {
+  const key = contextKey();
+  const intent = /add|subscription|change|revise|create/i.test(text);
+  state.conversations[key].push({ role: "user", text });
+  let response;
+  let proposalId;
+  if (key === "portfolio") {
+    response = intent
+      ? "Choose Northstar or Fieldnotes before preparing a plan change. This portfolio conversation has no authority to change either project."
+      : "Northstar has work awaiting owner review. Fieldnotes has an approved research task ready to start. Open either project for its own records and next action.";
+  } else {
+    const project = projectData[key];
+    const run = state.projects[key];
+    if (intent) {
+      proposalId = `${key}-${state.nextProposal++}`;
+      state.proposals[proposalId] = {
+        id: proposalId,
+        projectId: key,
+        projectName: project.name,
+        screen: state.view,
+        title: `Add subscriptions to ${project.name}`,
+        expectedRevision: project.planRevision,
+        before: project.before,
+        after: "New billing discovery and implementation milestone",
+      };
+      response = `I prepared a draft change for ${project.name}. Its approved scope stays unchanged until you review the exact project revision and approve through the existing gates.`;
+    } else if (/offline|provider/i.test(text)) {
+      response = `${project.name} records stay available locally when the provider is offline. No new agent work starts; saved reviews and deterministic guidance remain available.`;
+    } else {
+      const rec = recommendation(project, run);
+      response = `${project.name}: ${rec.title}. ${rec.reason} This is an illustrative answer based on the selected project’s displayed state.`;
+    }
+  }
+  state.conversations[key].push({
+    role: "assistant",
+    text: response,
+    proposalId,
+  });
+  state.drafts[key] = "";
+  state.assistantOpen = true;
   render();
-  if (focus) $("#panel-input").focus();
+  $("#assistant-content").scrollTop = $("#assistant-content").scrollHeight;
 }
-function handleAction(action) {
-  if (
-    [
-      "portfolio",
-      "projects",
-      "inbox",
-      "activity",
-      "settings",
-      "overview",
-      "roadmap",
-      "review",
-      "design",
-      "releases",
-      "history",
-      "new",
-    ].includes(action)
-  ) {
-    navigate(action);
+
+function setRunState(next) {
+  const run = currentRun();
+  run.runState = next;
+  if (next === "awaiting_review") run.reviewPending = true;
+  state.notice =
+    "All automation transitions here are simulated; the real coordinator would recheck policy and evidence.";
+  render();
+}
+
+function handleAction(action, element) {
+  const targetProject = element?.dataset?.project;
+  if (allViews.has(action)) {
+    navigate(action, targetProject);
     return;
   }
   if (action === "proposal") {
-    state.prompt = "Add subscriptions";
-    state.proposal = true;
-    openAssistant(false);
+    sendMessage("Add subscriptions");
     return;
   }
   if (action === "ask-next") {
-    state.prompt = "What should I do next?";
-    state.proposal = false;
-    openAssistant(false);
+    sendMessage("What should I do next?");
     return;
   }
-  if (action === "offline") {
-    state.mode = "offline";
-    navigate("overview");
-    state.mode = "offline";
-    render();
+  if (action === "ask-offline") {
+    sendMessage("What if the provider is offline?");
     return;
   }
-  if (action === "working") {
-    state.mode = "working";
-    navigate("overview");
-    state.mode = "working";
-    render();
-    return;
-  }
-  if (action === "proposal-review") {
-    navigate("roadmap");
-    openAssistant(false);
-    return;
-  }
-  if (action === "accept") {
-    state.simulatedApproval = true;
-    render();
-    return;
-  }
-  if (action === "request") {
-    state.prompt = "Request changes: make the welcome text clearer";
-    openAssistant();
-    return;
-  }
-  if (action === "pause") {
-    state.mode = "blocked";
+  if (action === "review-proposal") {
+    const proposalId =
+      element?.closest("[data-proposal-id]")?.dataset.proposalId;
+    const proposal = state.proposals[proposalId];
+    if (
+      !proposal ||
+      proposal.projectId !== state.selectedProject ||
+      proposal.projectId !== contextKey() ||
+      targetProject !== proposal.projectId
+    ) {
+      state.notice =
+        "This proposal belongs to another project. Return to its original conversation to review it.";
+      render();
+      return;
+    }
+    navigate("roadmap", proposal.projectId);
+    state.assistantOpen = true;
     render();
     return;
   }
@@ -254,18 +562,88 @@ function handleAction(action) {
     $("#panel-input").focus();
     return;
   }
+  if (action === "start" && currentRun().runState === "ready") {
+    setRunState("working");
+    return;
+  }
+  if (action === "pause-after" && currentRun().runState === "working") {
+    setRunState("pause_requested");
+    return;
+  }
+  if (
+    action === "cancel-pause" &&
+    currentRun().runState === "pause_requested"
+  ) {
+    setRunState("working");
+    return;
+  }
+  if (
+    action === "pause-now" &&
+    ["working", "pause_requested"].includes(currentRun().runState)
+  ) {
+    setRunState("paused");
+    return;
+  }
+  if (
+    action === "finish-task" &&
+    ["working", "pause_requested"].includes(currentRun().runState)
+  ) {
+    const wasPauseRequested = currentRun().runState === "pause_requested";
+    currentRun().reviewPending = true;
+    setRunState(wasPauseRequested ? "paused" : "awaiting_review");
+    return;
+  }
+  if (action === "resume" && currentRun().runState === "paused") {
+    setRunState("ready");
+    return;
+  }
+  if (action === "accept" && currentRun().reviewPending) {
+    currentRun().reviewAccepted = true;
+    currentRun().reviewPending = false;
+    if (currentRun().runState === "awaiting_review")
+      currentRun().runState = "ready";
+    state.notice =
+      "Illustrative owner acceptance recorded. Any automatic continuation would recheck every approval, dependency, permission and limit.";
+    render();
+    return;
+  }
+  if (action === "request" && currentRun().reviewPending) {
+    state.notice =
+      "In the real product, requesting changes would record a reason and keep the result unaccepted. This prototype makes no project change.";
+    render();
+  }
 }
+
 document.addEventListener("click", (event) => {
   const target = event.target.closest("[data-action],[data-view]");
-  if (target) handleAction(target.dataset.action || target.dataset.view);
+  if (target)
+    handleAction(target.dataset.action || target.dataset.view, target);
+});
+document.addEventListener("input", (event) => {
+  if (!["global-input", "panel-input"].includes(event.target.id)) return;
+  const draft = event.target.value;
+  state.drafts[contextKey()] = draft;
+  (event.target.id === "global-input"
+    ? $("#panel-input")
+    : $("#global-input")
+  ).value = draft;
+});
+document.addEventListener("change", (event) => {
+  if (event.target.id !== "state-select") return;
+  const next = event.target.value;
+  if (!runStates.includes(next)) return;
+  currentRun().runState = next;
+  currentRun().reviewPending = next === "awaiting_review";
+  state.notice = "Preview state changed for this illustrative project only.";
+  render();
 });
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
     $("#global-input").focus();
   }
-  if (event.key === "Escape" && state.assistant) {
-    state.assistant = false;
+  if (event.key === "Escape" && state.assistantOpen) {
+    state.assistantOpen = false;
     render();
     $("#assistant-toggle").focus();
   }
@@ -274,16 +652,16 @@ document.addEventListener("keydown", (event) => {
     event.target.matches(".project-card")
   ) {
     event.preventDefault();
-    handleAction(event.target.dataset.action);
+    handleAction("overview", event.target);
   }
 });
 $("#assistant-toggle").addEventListener("click", () => {
-  state.assistant = !state.assistant;
+  state.assistantOpen = !state.assistantOpen;
   render();
-  if (state.assistant) $("#panel-input").focus();
+  if (state.assistantOpen) $("#panel-input").focus();
 });
 $("#assistant-close").addEventListener("click", () => {
-  state.assistant = false;
+  state.assistantOpen = false;
   render();
   $("#assistant-toggle").focus();
 });
@@ -294,27 +672,16 @@ $("#theme-toggle").addEventListener("click", () => {
 });
 $("#global-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  const text = $("#global-input").value.trim();
-  if (!text) return;
-  state.prompt = text;
-  state.proposal = /add|subscription|change|revise|create/i.test(text);
-  $("#global-input").value = "";
-  openAssistant(false);
+  const text = state.drafts[contextKey()].trim();
+  if (text) sendMessage(text);
 });
 $("#panel-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  const text = $("#panel-input").value.trim();
-  if (!text) return;
-  state.prompt = text;
-  state.proposal = /add|subscription|change|revise|create/i.test(text);
-  $("#panel-input").value = "";
-  render();
-  $("#panel-input").focus();
-});
-document.addEventListener("change", (event) => {
-  if (event.target.id === "state-select") {
-    state.mode = event.target.value;
-    render();
+  const text = state.drafts[contextKey()].trim();
+  if (text) {
+    sendMessage(text);
+    $("#panel-input").focus();
   }
 });
-render();
+if (params.get("proposal") === "open") sendMessage("Add subscriptions");
+else render();

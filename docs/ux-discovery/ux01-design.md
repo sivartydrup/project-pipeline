@@ -2,6 +2,8 @@
 
 12 October 2026 · Design proposal for owner review. The [clickable prototype](../../prototype/README.md) uses illustrative data and performs no domain writes.
 
+The owner approved this overall direction for continued **design refinement** on 12 October 2026. The [review refinements](ux01-review-refinements.md) add explicit per-project context, multi-turn assistant continuity, proposal binding, and seven distinct automation states. Production implementation authorization and native validation remain separate gates.
+
 ## Screen model
 
 Global nav: Home, Projects, Inbox, Activity, Settings. A project opens on Overview, then Roadmap, Work, Design, Releases and History. Advanced exposes terminal, exact IDs, logs, diff, diagnostics and CLI/API. The compact composer stays visible across primary screens. An assistant panel opens at right on desktop, preserves page context and draft, and becomes an overlay drawer when the center would fall below a readable width. Escape closes it and returns focus to its toggle; Ctrl/Cmd+K focuses the composer.
@@ -39,7 +41,7 @@ Components to implement after approval: `AppShell`, `GlobalNav`, `ProjectSwitche
 
 ## Screenshot set
 
-The [prototype screenshots](../../prototype/screenshots/) show portfolio light, project overview, assistant proposal, work review, active run dark, blocked decision and provider offline. They were captured with Edge headless at 1440×900. They are visual snapshots of illustrative data, not native Windows or macOS app screenshots.
+The [prototype screenshots](../../prototype/screenshots/) show both project contexts, assistant conversations and proposals, work review, active run dark, pause requested/paused, blocked decision and provider offline. The refined set was captured with Playwright driving installed Chrome at 1440×900. They are visual snapshots of illustrative data, not native Windows or macOS app screenshots.
 
 ## Owner design decisions to record
 

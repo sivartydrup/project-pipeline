@@ -1,0 +1,11 @@
+{
+  "name": "project-pipeline-ux-prototype",
+  "private": true,
+  "scripts": {
+    "test": "node tests/smoke.cjs",
+    "screenshots": "node tests/capture.cjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.56.1"
+  }
+}

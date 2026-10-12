@@ -35,11 +35,19 @@
         </nav>
         <div class="rail-divider"></div>
         <div class="rail-section-label">YOUR PROJECTS</div>
-        <button class="project-link" data-view="overview">
+        <button
+          class="project-link"
+          data-project="northstar"
+          data-view="overview"
+        >
           <span class="project-swatch teal"></span><span>Northstar</span
-          ><small>Review</small>
+          ><small>Awaiting review</small>
         </button>
-        <button class="project-link" data-view="overview">
+        <button
+          class="project-link"
+          data-project="fieldnotes"
+          data-view="overview"
+        >
           <span class="project-swatch violet"></span><span>Fieldnotes</span
           ><small>Planning</small>
         </button>
@@ -125,6 +133,7 @@
         </div>
         <form id="global-form" class="global-composer">
           <span class="composer-spark">✦</span
+          ><span id="global-context" class="composer-context">All projects</span
           ><label class="sr-only" for="global-input">Ask the assistant</label
           ><input
             id="global-input"
@@ -133,6 +142,13 @@
           /><span class="composer-hint">⌘ K</span
           ><button type="submit">Ask assistant <span>↗</span></button>
         </form>
+        <div
+          id="demo-notice"
+          class="demo-notice"
+          role="status"
+          aria-live="polite"
+          hidden
+        ></div>
       </div>
     </div>
   </body>
