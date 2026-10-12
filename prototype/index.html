@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Project Pipeline · Modern Product Studio prototype</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body data-theme="light">
+    <div class="prototype-banner" role="note">
+      INTERACTIVE DESIGN PROTOTYPE
+      <span>Illustrative data · no real project changes</span>
+    </div>
+    <div class="app-shell">
+      <aside class="rail" aria-label="Global navigation">
+        <div class="brand" aria-label="Project Pipeline">
+          <span class="brand-mark">◈</span
+          ><span>pipeline<span class="brand-dot">.</span></span>
+        </div>
+        <div class="rail-section-label">WORKSPACE</div>
+        <nav id="global-nav" aria-label="Workspace">
+          <button class="nav-item active" data-view="portfolio">
+            <span class="nav-icon">⌂</span> Home
+          </button>
+          <button class="nav-item" data-view="projects">
+            <span class="nav-icon">▦</span> Projects
+          </button>
+          <button class="nav-item" data-view="inbox">
+            <span class="nav-icon">◎</span> Inbox <span class="count">2</span>
+          </button>
+          <button class="nav-item" data-view="activity">
+            <span class="nav-icon">◷</span> Activity
+          </button>
+        </nav>
+        <div class="rail-divider"></div>
+        <div class="rail-section-label">YOUR PROJECTS</div>
+        <button
+          class="project-link"
+          data-project="northstar"
+          data-view="overview"
+        >
+          <span class="project-swatch teal"></span><span>Northstar</span
+          ><small>Awaiting review</small>
+        </button>
+        <button
+          class="project-link"
+          data-project="fieldnotes"
+          data-view="overview"
+        >
+          <span class="project-swatch violet"></span><span>Fieldnotes</span
+          ><small>Planning</small>
+        </button>
+        <button class="new-project" data-view="new">＋ New project</button>
+        <div class="rail-bottom">
+          <button class="nav-item" data-view="settings">
+            <span class="nav-icon">⚙</span> Settings
+          </button>
+          <div class="profile">
+            <span class="avatar">S</span
+            ><span
+              ><strong>Studio owner</strong><small>Local workspace</small></span
+            ><span class="profile-more">···</span>
+          </div>
+        </div>
+      </aside>
+      <div class="workspace">
+        <header class="topbar">
+          <div id="breadcrumb" class="breadcrumb">
+            Workspace <span>/</span> Home
+          </div>
+          <div class="top-actions">
+            <span class="local-pill"
+              ><span class="online-dot"></span> Local first</span
+            ><button
+              id="theme-toggle"
+              class="icon-button"
+              aria-label="Switch to dark theme"
+              title="Toggle light and dark theme"
+            >
+              ☾</button
+            ><button
+              id="assistant-toggle"
+              class="assistant-toggle"
+              aria-expanded="false"
+              aria-controls="assistant-panel"
+            >
+              <span>✦</span> Assistant
+            </button>
+          </div>
+        </header>
+        <div class="stage">
+          <main id="main-content" tabindex="-1"></main>
+          <aside
+            id="assistant-panel"
+            class="assistant-panel"
+            aria-label="AI assistant"
+            hidden
+          >
+            <div class="assistant-head">
+              <div>
+                <div class="eyebrow">PROJECT CONTEXT</div>
+                <strong><span class="spark">✦</span> Your assistant</strong>
+              </div>
+              <button
+                id="assistant-close"
+                class="icon-button"
+                aria-label="Close assistant"
+              >
+                ×
+              </button>
+            </div>
+            <div id="assistant-content" class="assistant-content"></div>
+            <div class="assistant-foot">
+              <div class="model-note">
+                Illustrative conversation · no provider connected
+              </div>
+              <form id="panel-form" class="panel-compose">
+                <label class="sr-only" for="panel-input">Ask assistant</label
+                ><textarea
+                  id="panel-input"
+                  rows="2"
+                  placeholder="Ask about this project…"
+                ></textarea
+                ><button type="submit" aria-label="Send message">➜</button>
+              </form>
+              <div class="assistant-disclaimer">
+                Answers are read-only. Changes require a preview and owner
+                approval.
+              </div>
+            </div>
+          </aside>
+        </div>
+        <form id="global-form" class="global-composer">
+          <span class="composer-spark">✦</span
+          ><span id="global-context" class="composer-context">All projects</span
+          ><label class="sr-only" for="global-input">Ask the assistant</label
+          ><input
+            id="global-input"
+            placeholder="Ask anything about your projects, or describe a change…"
+            autocomplete="off"
+          /><span class="composer-hint">⌘ K</span
+          ><button type="submit">Ask assistant <span>↗</span></button>
+        </form>
+        <div
+          id="demo-notice"
+          class="demo-notice"
+          role="status"
+          aria-live="polite"
+          hidden
+        ></div>
+      </div>
+    </div>
+  </body>
+</html>
