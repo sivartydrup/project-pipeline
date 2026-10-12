@@ -207,7 +207,7 @@ impl ProjectEngine {
                 target_id,
                 field,
                 before,
-                ..
+                after,
             } => {
                 let latest = discovery.briefs.last().ok_or(ProposalError::Conflict)?;
                 if latest.revision != proposal.expected_revision
@@ -216,6 +216,7 @@ impl ProjectEngine {
                 {
                     return Err(ProposalError::Conflict);
                 }
+                proposed_brief(&latest.content, *field, after)?;
                 (
                     latest.id.clone(),
                     if discovery.approved_revision > 0
@@ -354,8 +355,8 @@ impl ProjectEngine {
         let p = &preview.proposal;
         match &p.change {
             ProposalChange::BriefField { field, after, .. } => {
-                let mut content = self.load_discovery(&p.project_id)?.latest_content();
-                *brief_value_mut(&mut content, *field) = after.clone();
+                let current = self.load_discovery(&p.project_id)?.latest_content();
+                let content = proposed_brief(&current, *field, after)?;
                 self.save_brief(&p.project_id, p.expected_revision, &content)?;
             }
             ProposalChange::TaskDraft {
@@ -403,6 +404,31 @@ impl ProjectEngine {
         }
         Ok(())
     }
+}
+
+fn proposed_brief(
+    current: &crate::BriefContent,
+    field: BriefField,
+    after: &str,
+) -> Result<crate::BriefContent, ProposalError> {
+    let mut candidate = current.clone();
+    *brief_value_mut(&mut candidate, field) = after.to_owned();
+    if !candidate.has_required_intake() {
+        let missing = [
+            ("idea", &candidate.idea),
+            ("audience", &candidate.audience),
+            ("problem", &candidate.problem),
+            ("desired outcome", &candidate.desired_outcome),
+        ]
+        .into_iter()
+        .filter_map(|(name, value)| value.trim().is_empty().then_some(name))
+        .collect::<Vec<_>>()
+        .join(", ");
+        return Err(ProposalError::Invalid(format!(
+            "brief requires non-empty {missing} before Apply"
+        )));
+    }
+    Ok(candidate)
 }
 
 fn brief_value(content: &crate::BriefContent, field: BriefField) -> &String {
@@ -588,6 +614,78 @@ mod tests {
             engine.preview_proposal(&p),
             Err(ProposalError::Conflict)
         ));
+    }
+
+    #[test]
+    fn brief_preview_validates_complete_result_without_audit() {
+        let (_, mut engine, id, mut proposal) = fixture();
+        assert_eq!(
+            engine.preview_proposal(&proposal).unwrap().status,
+            ProposalStatus::Validated
+        );
+
+        if let ProposalChange::BriefField { after, .. } = &mut proposal.change {
+            *after = "   ".into();
+        }
+        let audit_before_rejection = engine.load_review(&id).unwrap().activity.len();
+        assert!(matches!(
+            engine.preview_proposal(&proposal),
+            Err(ProposalError::Invalid(_))
+        ));
+        assert_eq!(
+            engine.load_review(&id).unwrap().activity.len(),
+            audit_before_rejection
+        );
+
+        let mut incomplete = engine.load_discovery(&id).unwrap().latest_content();
+        incomplete.audience.clear();
+        let latest = engine
+            .save_brief(&id, 1, &incomplete)
+            .unwrap()
+            .briefs
+            .pop()
+            .unwrap();
+        proposal.expected_revision = latest.revision;
+        proposal.original_evidence_ids = vec![latest.id.clone()];
+        if let ProposalChange::BriefField {
+            target_id, after, ..
+        } = &mut proposal.change
+        {
+            *target_id = latest.id;
+            *after = "New idea".into();
+        }
+        let audit_before_rejection = engine.load_review(&id).unwrap().activity.len();
+        let error = engine.preview_proposal(&proposal).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("brief requires non-empty audience")
+        );
+        let forged_preview = ProposalPreview {
+            proposal: proposal.clone(),
+            status: ProposalStatus::Validated,
+            explanation: "forged".into(),
+            authoritative_record_id: proposal.original_evidence_ids[0].clone(),
+        };
+        assert!(matches!(
+            engine.apply_proposal(&forged_preview, true),
+            Err(ProposalError::Invalid(_))
+        ));
+        assert_eq!(
+            engine.load_review(&id).unwrap().activity.len(),
+            audit_before_rejection
+        );
+        assert_eq!(engine.load_discovery(&id).unwrap().latest_revision(), 2);
+
+        proposal.expected_revision = 1;
+        assert!(matches!(
+            engine.preview_proposal(&proposal),
+            Err(ProposalError::Conflict)
+        ));
+        assert_eq!(
+            engine.load_review(&id).unwrap().activity.len(),
+            audit_before_rejection
+        );
     }
 
     #[test]

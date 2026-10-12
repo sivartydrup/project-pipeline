@@ -92,8 +92,50 @@ struct ProposalDraft {
     kind: usize,
     after: String,
     preview: Option<ProposalPreview>,
+    preview_input: Option<ProposalInputFingerprint>,
     owner_confirmed: bool,
     message: String,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct ProposalInputFingerprint {
+    kind: usize,
+    target_id: String,
+    after: String,
+}
+
+impl ProposalDraft {
+    fn current_input(&self, target_id: &str) -> ProposalInputFingerprint {
+        ProposalInputFingerprint {
+            kind: self.kind,
+            target_id: target_id.to_owned(),
+            after: self.after.clone(),
+        }
+    }
+
+    fn invalidate(&mut self, message: &str) {
+        self.preview = None;
+        self.preview_input = None;
+        self.owner_confirmed = false;
+        self.message = message.to_owned();
+    }
+
+    fn invalidate_if_input_changed(&mut self, target_id: &str) {
+        if self.preview.is_some()
+            && self.preview_input.as_ref() != Some(&self.current_input(target_id))
+        {
+            self.invalidate(
+                "Proposal text or target changed. Review a new preview before applying.",
+            );
+        }
+    }
+
+    fn load_preview(&mut self, preview: ProposalPreview, target_id: &str, message: &str) {
+        self.preview_input = Some(self.current_input(target_id));
+        self.preview = Some(preview);
+        self.owner_confirmed = false;
+        self.message = message.to_owned();
+    }
 }
 
 impl AssistantDrafts {
@@ -420,7 +462,7 @@ impl Default for DesktopApp {
                 app.proposal_drafts
                     .entry(project_id.clone())
                     .or_default()
-                    .preview = Some(preview);
+                    .load_preview(preview, &brief.id, "Validated against current records.");
             }
         }
         app
@@ -565,6 +607,9 @@ impl DesktopApp {
     }
 
     fn select_project(&mut self, id: String) {
+        for draft in self.proposal_drafts.values_mut() {
+            draft.owner_confirmed = false;
+        }
         self.selected_project = Some(id.clone());
         self.studio_home = false;
         self.next_action_cache = None;
@@ -2861,6 +2906,7 @@ impl DesktopApp {
             .entry(project_id.to_owned())
             .or_default();
         if let Some(previous) = state.preview.as_ref() {
+            ui.ctx().request_repaint_after(Duration::from_millis(500));
             match self
                 .engine
                 .as_ref()
@@ -2869,9 +2915,7 @@ impl DesktopApp {
             {
                 Ok(fresh) if fresh == *previous => {}
                 Ok(_) | Err(_) => {
-                    state.preview = None;
-                    state.owner_confirmed = false;
-                    state.message = "Proposal changed or became stale. Review a fresh proposal from current values.".into();
+                    state.invalidate("Proposal changed or became stale. Review a fresh proposal from current values.");
                 }
             }
         }
@@ -2881,6 +2925,7 @@ impl DesktopApp {
         }
         if state.kind >= candidates.len() {
             state.kind = 0;
+            state.invalidate("Proposal target changed. Review a new preview before applying.");
         }
         let old_kind = state.kind;
         egui::ComboBox::from_id_salt("proposal_kind")
@@ -2892,18 +2937,21 @@ impl DesktopApp {
             });
         if state.kind != old_kind {
             state.after.clear();
-            state.preview = None;
-            state.owner_confirmed = false;
+            state.invalidate("Proposal target changed. Review a new preview before applying.");
         }
         let (label, kind, target, revision, approved_brief, scope, before) =
             &candidates[state.kind];
+        state.invalidate_if_input_changed(target);
         ui.label(format!("Current {label}: {before}"));
-        ui.add(
+        let edit = ui.add(
             egui::TextEdit::multiline(&mut state.after)
                 .desired_rows(3)
                 .char_limit(2_000)
                 .hint_text("Proposed text"),
         );
+        if edit.changed() {
+            state.invalidate_if_input_changed(target);
+        }
         let build = ui.button("Review manual proposal").clicked();
         let parse_answer = ui
             .button("Review latest assistant JSON suggestion")
@@ -2932,13 +2980,10 @@ impl DesktopApp {
                 .and_then(|proposal| self.engine.as_ref().unwrap().preview_proposal(&proposal))
             {
                 Ok(preview) => {
-                    state.preview = Some(preview);
-                    state.owner_confirmed = false;
-                    state.message = "Validated against current records.".into();
+                    state.load_preview(preview, target, "Validated against current records.");
                 }
                 Err(error) => {
-                    state.preview = None;
-                    state.message = error.to_string();
+                    state.invalidate(&error.to_string());
                 }
             }
         }
@@ -2956,14 +3001,14 @@ impl DesktopApp {
                 self.engine.as_ref().unwrap().preview_proposal(&proposal)
             }) {
                 Ok(preview) => {
-                    state.preview = Some(preview);
-                    state.owner_confirmed = false;
-                    state.message =
-                        "Assistant suggestion validated against current records.".into();
+                    state.load_preview(
+                        preview,
+                        target,
+                        "Assistant suggestion validated against current records.",
+                    );
                 }
                 Err(error) => {
-                    state.preview = None;
-                    state.message = format!("Non-executable suggestion: {error}");
+                    state.invalidate(&format!("Non-executable suggestion: {error}"));
                 }
             }
         }
@@ -3010,11 +3055,14 @@ impl DesktopApp {
                     } => (target_id, before, after),
                 };
                 ui.label(format!(
-                    "Target: {}",
+                    "Target: {} · ID: {target}",
                     match &preview.proposal.change {
-                        pipeline_engine::ProposalChange::BriefField { .. } => "Product brief",
-                        pipeline_engine::ProposalChange::TaskDraft { .. } => "Task draft",
-                        pipeline_engine::ProposalChange::PlanDraft { .. } => "Plan milestone draft",
+                        pipeline_engine::ProposalChange::BriefField { field, .. } =>
+                            format!("Product brief · {field:?}"),
+                        pipeline_engine::ProposalChange::TaskDraft { field, .. } =>
+                            format!("Task draft · {field:?}"),
+                        pipeline_engine::ProposalChange::PlanDraft { field, .. } =>
+                            format!("Plan milestone draft · {field:?}"),
                     }
                 ));
                 ui.label(format!("Before: {before}"));
@@ -3073,24 +3121,20 @@ impl DesktopApp {
                 .preview_proposal(&preview.proposal)
             {
                 Ok(fresh) => {
-                    state.preview = Some(fresh);
-                    state.owner_confirmed = false;
-                    state.message = "Preview refreshed; confirm again to apply.".into();
+                    state.load_preview(fresh, target, "Preview refreshed; confirm again to apply.");
                 }
                 Err(error) => {
-                    state.preview = None;
-                    state.owner_confirmed = false;
-                    state.message =
-                        format!("Conflict: {error}. Create a new proposal from current values.");
+                    state.invalidate(&format!(
+                        "Conflict: {error}. Create a new proposal from current values."
+                    ));
                 }
             }
         }
         if discard {
-            state.preview = None;
-            state.owner_confirmed = false;
-            state.message = "Proposal discarded without changes.".into();
+            state.invalidate("Proposal discarded without changes.");
         }
         if apply && let Some(preview) = state.preview.take() {
+            state.preview_input = None;
             state.owner_confirmed = false;
             match self.engine.as_mut().unwrap().apply_proposal(&preview, true) {
                 Ok(()) => {
@@ -3222,6 +3266,11 @@ impl DesktopApp {
     }
 
     fn modern_ui(&mut self, ui: &mut egui::Ui) {
+        if self.studio_home {
+            for draft in self.proposal_drafts.values_mut() {
+                draft.owner_confirmed = false;
+            }
+        }
         let ctx = ui.ctx().clone();
         self.poll_assistant(&ctx);
         self.poll_run(&ctx);
@@ -3832,6 +3881,79 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod assistant_draft_tests {
     use super::*;
+
+    fn sample_preview(id: &str) -> ProposalPreview {
+        let raw = serde_json::json!({
+            "version": 1, "id": id, "project_id": "alpha", "expected_revision": 1,
+            "expected_approved_brief_revision": 0, "expected_scope_revision": 0,
+            "original_evidence_ids": ["brief-1"], "reason": "Refine", "impact": "Draft",
+            "affected_approved_scope": "None", "prerequisites": "Owner", "risk": "Low",
+            "required_owner_approvals": "Apply", "recovery": "Restore prior draft",
+            "change": {"type": "brief_field", "target_id": "brief-1", "field": "idea", "before": "Old", "after": "New"}
+        }).to_string();
+        ProposalPreview {
+            proposal: Proposal::parse_json(&raw).unwrap(),
+            status: ProposalStatus::Validated,
+            explanation: "Draft only".into(),
+            authoritative_record_id: "brief-1".into(),
+        }
+    }
+
+    #[test]
+    fn editing_after_preview_revokes_preview_and_confirmation() {
+        let mut draft = ProposalDraft {
+            after: "New".into(),
+            ..Default::default()
+        };
+        draft.load_preview(sample_preview("first"), "brief-1", "Validated");
+        draft.owner_confirmed = true;
+        draft.after = "Different".into();
+        draft.invalidate_if_input_changed("brief-1");
+        assert!(draft.preview.is_none());
+        assert!(!draft.owner_confirmed);
+    }
+
+    #[test]
+    fn switching_target_or_project_revokes_confirmation() {
+        let mut draft = ProposalDraft {
+            after: "New".into(),
+            ..Default::default()
+        };
+        draft.load_preview(sample_preview("first"), "brief-1", "Validated");
+        draft.owner_confirmed = true;
+        draft.kind = 1;
+        draft.invalidate_if_input_changed("task-1");
+        assert!(draft.preview.is_none());
+        assert!(!draft.owner_confirmed);
+
+        let mut app = DesktopApp::default();
+        let mut draft = ProposalDraft::default();
+        draft.load_preview(sample_preview("second"), "brief-1", "Validated");
+        draft.owner_confirmed = true;
+        app.proposal_drafts.insert("alpha".into(), draft);
+        app.select_project("beta".into());
+        assert!(!app.proposal_drafts["alpha"].owner_confirmed);
+    }
+
+    #[test]
+    fn discard_and_new_assistant_preview_require_fresh_confirmation() {
+        let mut draft = ProposalDraft::default();
+        draft.load_preview(sample_preview("first"), "brief-1", "Validated");
+        draft.owner_confirmed = true;
+        draft.invalidate("Proposal discarded without changes.");
+        assert!(draft.preview.is_none());
+        assert!(!draft.owner_confirmed);
+        draft.load_preview(
+            sample_preview("assistant-second"),
+            "brief-1",
+            "Assistant suggestion validated",
+        );
+        assert!(!draft.owner_confirmed);
+        assert_eq!(
+            draft.preview.as_ref().unwrap().proposal.id,
+            "assistant-second"
+        );
+    }
 
     #[test]
     fn drafts_are_isolated_by_project_and_portfolio() {
