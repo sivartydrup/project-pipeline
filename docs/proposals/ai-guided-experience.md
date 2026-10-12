@@ -47,3 +47,25 @@ First idea-to-draft without technical help; time to locate next action; task rev
 
 ## Approval questions
 Confirm: (1) AI-first home + workflow-forward navigation; (2) progressive advanced workspace; (3) design direction; (4) assistant scope and provider/harness strategy; (5) whether to prioritize this redesign before P16–P19. Until approved, only discovery/prototyping and documentation are authorized.
+
+## Direction selected in design discussion (2026-10-12)
+Owner preference: **guided dashboard with an always-available AI assistant**, rather than chat-only or a permanently equal split. This is a design preference, not final scope or implementation approval.
+
+### Shell behavior
+- Global portfolio and project dashboard are the default; an AI composer remains visible and keyboard accessible.
+- Assistant expands into a contextual side panel or focused conversation view without losing project context; narrow layouts use a drawer.
+- Project home foregrounds a single explainable next action, attention queue, verified progress, current activity and stage journey.
+- Stage-specific guidance adapts for idea, discovery, planning, design, build, test, release and operation; users may override recommendations.
+- Preserve advanced developer tooling behind explicit progressive disclosure, not removal.
+
+### Design review checkpoints
+1. Approve information architecture and core journeys.
+2. Review high-fidelity light/dark prototypes for global home, project home, assistant expanded, new idea, review and recovery.
+3. Validate usability and accessibility on real native builds before broad implementation.
+4. Only then authorize and sequence UX backlog tasks against P16–P19.
+
+### Assistant usability requirements
+- Context includes selected project and currently focused object, clearly indicated to user; allow changing context.
+- Offer actionable suggested prompts and explicit previews, not invisible autonomous state changes.
+- Show what was observed vs inferred, why next step is recommended, and which approvals are required.
+- Preserve project workflow when AI provider is unavailable; deterministic guidance and manual controls remain.
