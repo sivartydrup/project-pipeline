@@ -60,3 +60,14 @@ Neutral warm light surfaces and charcoal dark surfaces; restrained teal or blue 
 3. After approval, implement shell, deterministic recommendations, contextual read-only assistant, typed proposals, guided journeys and reviews in dependency order defined by plan/ux-redesign-backlog.json.
 4. Validate keyboard and scaled text, Windows and M1 Max, actual provider-offline behaviour, safe approvals, regression tests and verified evidence.
 5. Preserve approved baseline backlog; owner must authorize integration and re-sequencing before implementation.
+
+## Owner-confirmed assistant placement (2026-10-12)
+The user agreed to a **collapsible right-hand assistant panel with an always-visible compact prompt bar**. This confirms layout direction, not blanket authorization to implement the redesign.
+- Desktop default: project content remains primary; right panel expands for conversation and proposal previews, and collapses without losing draft/context.
+- The prompt bar remains accessible when the panel is closed, on every primary screen.
+- Resizing must preserve readability and usable minimum content width; on narrow windows assistant becomes a drawer, not a permanently squeezed column.
+- Focus, keyboard toggle, screen-reader labels, close/escape, and restoration of context/drafts require explicit prototype checks.
+- Prototype should demonstrate read-only questions, typed change proposal, approval preview, offline mode, and a running task while assistant panel is open.
+
+## Immediate Codex handoff: discovery and prototype only
+Codex may use this specification as input to prepare UX00 audit and UX01 prototype proposals. Do not alter production shell, change approved scope, or run unapproved work merely because this design document exists. First deliver: current UI screenshot inventory and pain points, detailed wireframes for S01/S02/S03/S07, egui feasibility/accessibility assessment, and high-fidelity interactive prototype or equivalent native spike for owner review. Await explicit owner authorization for implementation and backlog resequencing.
