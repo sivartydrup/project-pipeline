@@ -1,0 +1,36 @@
+Windows x86_64; 2026-10-12T15:03:40.8954527+11:00; Rust rustc 1.96.1 (31fca3adb 2026-06-26)
+cargo fmt --manifest-path spikes/modern-studio-native/Cargo.toml --check
+exit=0
+cargo clippy --manifest-path spikes/modern-studio-native/Cargo.toml --all-targets -- -D warnings
+    Checking modern-studio-native-spike v0.1.0 (C:\devwork\project-pipeline\spikes\modern-studio-native)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.38s
+exit=0
+cargo test --manifest-path spikes/modern-studio-native/Cargo.toml
+   Compiling modern-studio-native-spike v0.1.0 (C:\devwork\project-pipeline\spikes\modern-studio-native)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.71s
+     Running unittests src\main.rs (spikes\modern-studio-native\target\debug\deps\modern_studio_native_spike-3e24ff6e2106a5df.exe)
+
+running 3 tests
+test tests::close_requests_focus_return ... ok
+test tests::conversations_and_drafts_remain_project_scoped ... ok
+test tests::proposal_is_bound_to_its_project ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+exit=0
+cargo build --manifest-path spikes/modern-studio-native/Cargo.toml
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.48s
+exit=0
+cargo fmt --all --check
+exit=0
+Native screenshot dimensions:
+blocked-1440.png: 1440x900
+fieldnotes-1440-dark-assistant.png: 1440x900
+fieldnotes-1440-zoom200.png: 1440x900
+northstar-1024-light-drawer.png: 1024x900
+offline-1440-dark.png: 1440x900
+pause-requested-1440.png: 1440x900
+paused-1440.png: 1440x900
+portfolio-1440-light.png: 1440x900
+review-1024-zoom200.png: 1024x900
+review-1440-light.png: 1440x900
