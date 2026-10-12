@@ -26,8 +26,9 @@ The MacBook Pro M1 Max is not yet available. Native macOS checks remain release 
 
 UX04 is implemented on `codex/ux04-readonly-assistant`; PR #5 review
 refinements to cancellation, bounded workers, context sanitization, and
-regression coverage are complete. Live local inference remains unverified
-because no suitable endpoint was running. Owner final review remains pending.
+regression coverage are complete. The owner-authorized OpenRouter free-model
+smoke passed with four requests; live local inference remains unverified
+because no suitable local endpoint was running. Owner final review remains pending.
 Scope and evidence are in
 `docs/ux-discovery/ux04-implementation.md`. UX05 and P16–P19 remain
 unstarted; no acceptance or release gate changed.

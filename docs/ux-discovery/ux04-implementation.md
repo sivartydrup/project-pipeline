@@ -48,7 +48,8 @@ check no configured provider, paid remote rejection, endpoint and credential
 URL restrictions, tool-call denial, instruction/data separation, secret
 patterns, project and draft isolation, cancellation, streamed usage,
 permission denial, malformed data, unchanged activity on context reads and
-revision fingerprint changes. No live model inference was performed.
+revision fingerprint changes. No live model inference was performed in the
+initial UX04 implementation; see the later OpenRouter smoke record below.
 
 ## Windows native screenshots
 
@@ -126,12 +127,41 @@ standard Windows verification was rerun after the refinement:
 | `cargo test --workspace` | Pass | [log](../evidence/ux04-review-test.log) |
 | `cargo build -p pipeline-app` | Pass | [log](../evidence/ux04-review-build.log) |
 
-No suitable local OpenAI-compatible model endpoint was running. The common
+No suitable local OpenAI-compatible model endpoint was running during the
+PR #5 refinement. The common
 loopback inference ports (1234, 11434, 8000, 8080, 5000, 5001, 3000) had no
 listener, and the other loopback listeners belonged to unrelated services.
-No model was downloaded or service started. Live model selection, grounded
-answers, provider/model rendering, and live cancellation remain unverified;
-local HTTP fixtures verify protocol handling and error states instead.
+No model was downloaded or service started. Local HTTP fixtures verify
+protocol handling and error states.
+
+## OpenRouter free-model smoke (13 October 2026)
+
+The owner authorized use of their connected OpenRouter account for at most 30
+free-model test requests. The existing `OPENROUTER_API_KEY` was read from the
+environment; its value was never logged or stored. The OpenRouter model API
+reported `nvidia/nemotron-3.5-lightning:free` with zero prompt and completion
+prices. The app now offers a **Use OpenRouter free model** preset. Before each
+Send to the exact OpenRouter chat endpoint, the transport rechecks the exact
+model ID and zero prices. It rejects other remote endpoints, non-free model
+IDs, or unavailable/nonzero pricing. Paid inference remains disabled.
+
+Two runs of the live smoke test made **four inference requests total**, well
+under the authorized limit. Each run cancelled the first stream on its first
+text delta and retried with a fresh request. The retry streamed to completion,
+reported the selected model and token usage, and cited the synthetic task ID
+`synthetic-task-1` with its correct `ready` status. The final run emitted one
+model identity event; repeated metadata in SSE chunks no longer fills the
+bounded UI queue. Provider-unavailable and malformed-response cases remain
+covered by local fixtures. No real project data, tools, or domain mutations
+were involved. Evidence: [live smoke log](../evidence/ux04-openrouter-live.log).
+
+The account key reports no enforced monetary limit. Its `usage_daily` field
+was zero before and after the smoke test. The free variant and live zero-price
+check are the cost boundary for this path; if OpenRouter changes its free
+variant semantics or price between metadata lookup and inference, the app
+cannot guarantee a zero charge. The UI provider/model display is wired to
+the tested stream events, but a fresh native UI visual smoke was not run for
+this remote preset. The absence of a suitable *local* model remains unchanged.
 
 To return to the prior UI, unset `PIPELINE_MODERN_SHELL` or set it to a value
 other than `1`. No migration or data rollback is needed. The owner should

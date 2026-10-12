@@ -96,3 +96,8 @@ refinement record). Local endpoint
 operators must ensure the service does not proxy requests to a paid backend;
 the app cannot inspect the server behind a loopback URL. Remote paid inference
 remains unavailable pending a verifiable provider-side cap integration.
+
+On 13 October the owner separately authorized up to 30 free-model requests
+against their OpenRouter account. PR #5 now includes an exact-endpoint,
+exact-free-variant path with a live zero-price check before each Send. It does
+not permit paid remote models. See the [live smoke and residual risk](ux04-implementation.md).

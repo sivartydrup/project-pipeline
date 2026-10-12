@@ -2780,11 +2780,17 @@ impl DesktopApp {
             )
         });
         ui.collapsing("Provider settings", |ui| {
-            ui.label("OpenAI-compatible chat completions endpoint. Local loopback inference is supported. Remote paid calls fail closed until a verifiable provider spending cap is integrated.");
+            ui.label("Local loopback inference and verified OpenRouter free variants are supported. Paid remote calls remain blocked.");
+            if ui.button("Use OpenRouter free model").clicked() {
+                self.assistant_config.provider = "OpenRouter".into();
+                self.assistant_config.model = "nvidia/nemotron-3.5-lightning:free".into();
+                self.assistant_config.endpoint = "https://openrouter.ai/api/v1/chat/completions".into();
+                self.assistant_config.credential_env = "OPENROUTER_API_KEY".into();
+            }
             ui.label("Provider"); ui.text_edit_singleline(&mut self.assistant_config.provider);
             ui.label("Model"); ui.text_edit_singleline(&mut self.assistant_config.model);
             ui.label("Endpoint"); ui.text_edit_singleline(&mut self.assistant_config.endpoint);
-            ui.label("Credential environment variable (optional; PIPELINE_ASSISTANT_*)");
+            ui.label("Credential environment variable (PIPELINE_ASSISTANT_* locally; OPENROUTER_API_KEY for OpenRouter)");
             ui.text_edit_singleline(&mut self.assistant_config.credential_env);
         });
         let key = self.assistant_key();
