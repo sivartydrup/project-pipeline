@@ -1,5 +1,9 @@
 # UX design decision records · proposed
 
+## UX-D11 · Conservative typed draft proposal boundary
+
+**Status:** Implemented for UX05 owner PR review on 13 October 2026. **Choice:** Apply only initial unapproved brief field edits and edits to an existing unapproved plan draft before active scope; keep approved brief/scope and unsupported changes as read-only previews. **Reason:** Existing `ProjectEngine` draft saves have exact revision and audit, while UX05 has no separate material-scope proposal gate. **Impact:** No migration, scheduler or approval-policy change. **Evidence:** [UX05 service audit](ux05-design.md) and [verification](ux05-implementation.md). **Reversibility:** The feature flagged UI can be disabled; later owner-approved routes can expand eligibility.
+
 ## UX-D08 · UX04 conversational boundary and spending gate
 
 **Status:** Owner approved isolated, tool-free live chat architecture on 12
