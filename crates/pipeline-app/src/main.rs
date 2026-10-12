@@ -2,8 +2,8 @@ use eframe::egui;
 use pipeline_engine::{
     BriefContent, CriterionSpec, DecisionInput, DependencyKind, DependencySpec, DiscoveryView,
     EpicSpec, InboxItem, MilestoneSpec, NextAction, NextDestination, PlanContent, PlanView,
-    ProjectEngine, ProjectOverview, ResearchInput, ReviewView, TaskRunReview, TaskSpec,
-    sanitize_assistant_text,
+    ProjectEngine, ProjectOverview, Proposal, ProposalPreview, ProposalStatus, ResearchInput,
+    ReviewView, TaskRunReview, TaskSpec, sanitize_assistant_text,
 };
 use pipeline_terminal::TerminalSession;
 use serde::{Deserialize, Serialize};
@@ -87,6 +87,57 @@ struct ChatTurn {
     reported_model: Option<String>,
 }
 
+#[derive(Default)]
+struct ProposalDraft {
+    kind: usize,
+    after: String,
+    preview: Option<ProposalPreview>,
+    preview_input: Option<ProposalInputFingerprint>,
+    owner_confirmed: bool,
+    message: String,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct ProposalInputFingerprint {
+    kind: usize,
+    target_id: String,
+    after: String,
+}
+
+impl ProposalDraft {
+    fn current_input(&self, target_id: &str) -> ProposalInputFingerprint {
+        ProposalInputFingerprint {
+            kind: self.kind,
+            target_id: target_id.to_owned(),
+            after: self.after.clone(),
+        }
+    }
+
+    fn invalidate(&mut self, message: &str) {
+        self.preview = None;
+        self.preview_input = None;
+        self.owner_confirmed = false;
+        self.message = message.to_owned();
+    }
+
+    fn invalidate_if_input_changed(&mut self, target_id: &str) {
+        if self.preview.is_some()
+            && self.preview_input.as_ref() != Some(&self.current_input(target_id))
+        {
+            self.invalidate(
+                "Proposal text or target changed. Review a new preview before applying.",
+            );
+        }
+    }
+
+    fn load_preview(&mut self, preview: ProposalPreview, target_id: &str, message: &str) {
+        self.preview_input = Some(self.current_input(target_id));
+        self.preview = Some(preview);
+        self.owner_confirmed = false;
+        self.message = message.to_owned();
+    }
+}
+
 impl AssistantDrafts {
     fn active(&self, project_id: Option<&str>) -> &str {
         match project_id {
@@ -148,6 +199,7 @@ struct DesktopApp {
     assistant_drafts: AssistantDrafts,
     assistant_config: ChatConfig,
     assistant_sessions: BTreeMap<String, ChatSession>,
+    proposal_drafts: BTreeMap<String, ProposalDraft>,
     assistant_workers: Arc<AtomicUsize>,
     focus_composer: bool,
     focus_return: bool,
@@ -230,6 +282,7 @@ impl Default for DesktopApp {
             assistant_drafts: AssistantDrafts::default(),
             assistant_config: ChatConfig::default(),
             assistant_sessions: BTreeMap::new(),
+            proposal_drafts: BTreeMap::new(),
             assistant_workers: Arc::new(AtomicUsize::new(0)),
             focus_composer: false,
             focus_return: false,
@@ -386,6 +439,32 @@ impl Default for DesktopApp {
             *app.assistant_drafts.active_mut(context.as_deref()) = question;
             app.send_assistant();
         }
+        #[cfg(feature = "screenshot-evidence")]
+        if std::env::var("PIPELINE_UX_PROPOSAL_DEMO").is_ok_and(|v| v == "1")
+            && let (Some(engine), Some(project_id)) = (&app.engine, &app.selected_project)
+            && let Ok(discovery) = engine.load_discovery(project_id)
+            && let Ok(plan) = engine.load_plan(project_id)
+            && let Some(brief) = discovery.briefs.last()
+        {
+            let raw = serde_json::json!({
+                "version": 1, "id": "screenshot-preview", "project_id": project_id,
+                "expected_revision": brief.revision, "expected_approved_brief_revision": discovery.approved_revision,
+                "expected_scope_revision": plan.active_scope_revision, "original_evidence_ids": [brief.id],
+                "reason": "Clarify the product idea", "impact": "A new brief draft revision",
+                "affected_approved_scope": "None applied", "prerequisites": "Owner review",
+                "risk": "Low; draft text only", "required_owner_approvals": "Exact apply, then separate brief approval",
+                "recovery": "Restore previous text in a new draft revision",
+                "change": {"type": "brief_field", "target_id": brief.id, "field": "idea", "before": brief.content.idea, "after": format!("{} — refined", brief.content.idea)}
+            }).to_string();
+            if let Ok(preview) =
+                Proposal::parse_json(&raw).and_then(|p| engine.preview_proposal(&p))
+            {
+                app.proposal_drafts
+                    .entry(project_id.clone())
+                    .or_default()
+                    .load_preview(preview, &brief.id, "Validated against current records.");
+            }
+        }
         app
     }
 }
@@ -528,6 +607,9 @@ impl DesktopApp {
     }
 
     fn select_project(&mut self, id: String) {
+        for draft in self.proposal_drafts.values_mut() {
+            draft.owner_confirmed = false;
+        }
         self.selected_project = Some(id.clone());
         self.studio_home = false;
         self.next_action_cache = None;
@@ -2637,13 +2719,22 @@ impl DesktopApp {
             turn.status = "Offline guidance".into();
             session.turns.push(turn);
         } else {
-            if self
-                .assistant_workers
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                    (n < MAX_ASSISTANT_WORKERS).then_some(n + 1)
-                })
-                .is_err()
-            {
+            let mut workers = self.assistant_workers.load(Ordering::Acquire);
+            let reserved = loop {
+                if workers >= MAX_ASSISTANT_WORKERS {
+                    break false;
+                }
+                match self.assistant_workers.compare_exchange_weak(
+                    workers,
+                    workers + 1,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) {
+                    Ok(_) => break true,
+                    Err(actual) => workers = actual,
+                }
+            };
+            if !reserved {
                 turn.status = "Earlier requests are finishing; retry shortly".into();
                 session.turns.push(turn);
                 return;
@@ -2764,9 +2855,320 @@ impl DesktopApp {
         }
     }
 
+    fn proposal_content(&mut self, ui: &mut egui::Ui, project_id: &str) {
+        ui.separator();
+        ui.heading("Propose a draft change");
+        ui.label("Manual entry works offline. Assistant replies are untrusted suggestions until validated below.");
+        let mut candidates: Vec<(String, String, String, i64, i64, i64, String)> = Vec::new();
+        if let Some(engine) = &self.engine
+            && let (Ok(discovery), Ok(plan)) = (
+                engine.load_discovery(project_id),
+                engine.load_plan(project_id),
+            )
+        {
+            if let Some(brief) = discovery.briefs.last() {
+                candidates.push((
+                    "Brief · idea".into(),
+                    "brief_field".into(),
+                    brief.id.clone(),
+                    brief.revision,
+                    discovery.approved_revision,
+                    plan.active_scope_revision,
+                    brief.content.idea.clone(),
+                ));
+            }
+            if let Some(revision) = plan.revisions.last()
+                && revision.status == "draft"
+            {
+                for task in &revision.content.tasks {
+                    candidates.push((
+                        format!("Task · {}", task.id),
+                        "task_draft".into(),
+                        task.id.clone(),
+                        revision.revision,
+                        discovery.approved_revision,
+                        plan.active_scope_revision,
+                        task.title.clone(),
+                    ));
+                }
+                for milestone in &revision.content.milestones {
+                    candidates.push((
+                        format!("Plan milestone · {}", milestone.id),
+                        "plan_draft".into(),
+                        milestone.id.clone(),
+                        revision.revision,
+                        discovery.approved_revision,
+                        plan.active_scope_revision,
+                        milestone.title.clone(),
+                    ));
+                }
+            }
+        }
+        if !self.proposal_drafts.contains_key(project_id)
+            && self.proposal_drafts.len() >= 32
+            && let Some(oldest) = self.proposal_drafts.keys().next().cloned()
+        {
+            self.proposal_drafts.remove(&oldest);
+        }
+        let state = self
+            .proposal_drafts
+            .entry(project_id.to_owned())
+            .or_default();
+        if let Some(previous) = state.preview.as_ref() {
+            ui.ctx().request_repaint_after(Duration::from_millis(500));
+            match self
+                .engine
+                .as_ref()
+                .unwrap()
+                .preview_proposal(&previous.proposal)
+            {
+                Ok(fresh) if fresh == *previous => {}
+                Ok(_) | Err(_) => {
+                    state.invalidate("Proposal changed or became stale. Review a fresh proposal from current values.");
+                }
+            }
+        }
+        if candidates.is_empty() {
+            ui.label("Create a brief or a plan draft to begin.");
+            return;
+        }
+        if state.kind >= candidates.len() {
+            state.kind = 0;
+            state.invalidate("Proposal target changed. Review a new preview before applying.");
+        }
+        let old_kind = state.kind;
+        egui::ComboBox::from_id_salt("proposal_kind")
+            .selected_text(&candidates[state.kind].0)
+            .show_ui(ui, |ui| {
+                for (index, candidate) in candidates.iter().enumerate() {
+                    ui.selectable_value(&mut state.kind, index, &candidate.0);
+                }
+            });
+        if state.kind != old_kind {
+            state.after.clear();
+            state.invalidate("Proposal target changed. Review a new preview before applying.");
+        }
+        let (label, kind, target, revision, approved_brief, scope, before) =
+            &candidates[state.kind];
+        state.invalidate_if_input_changed(target);
+        ui.label(format!("Current {label}: {before}"));
+        let edit = ui.add(
+            egui::TextEdit::multiline(&mut state.after)
+                .desired_rows(3)
+                .char_limit(2_000)
+                .hint_text("Proposed text"),
+        );
+        if edit.changed() {
+            state.invalidate_if_input_changed(target);
+        }
+        let build = ui.button("Review manual proposal").clicked();
+        let parse_answer = ui
+            .button("Review latest assistant JSON suggestion")
+            .clicked();
+        if build {
+            let evidence_id = if kind == "brief_field" {
+                target.clone()
+            } else {
+                self.engine
+                    .as_ref()
+                    .and_then(|engine| engine.load_plan(project_id).ok())
+                    .and_then(|plan| plan.revisions.last().map(|item| item.id.clone()))
+                    .unwrap_or_default()
+            };
+            let raw = serde_json::json!({
+                "version": 1, "id": Uuid::new_v4().to_string(), "project_id": project_id,
+                "expected_revision": revision, "expected_approved_brief_revision": approved_brief,
+                "expected_scope_revision": scope, "original_evidence_ids": [evidence_id],
+                "reason": "Owner-entered draft suggestion", "impact": "New draft revision only",
+                "affected_approved_scope": "None applied", "prerequisites": "Review current draft",
+                "risk": "Review content before apply", "required_owner_approvals": "Explicit apply; later brief or plan approval remains separate",
+                "recovery": "Restore previous text in a new draft revision",
+                "change": {"type": kind, "target_id": target, "field": if kind == "brief_field" { "idea" } else { "title" }, "before": before, "after": state.after}
+            }).to_string();
+            match Proposal::parse_json(&raw)
+                .and_then(|proposal| self.engine.as_ref().unwrap().preview_proposal(&proposal))
+            {
+                Ok(preview) => {
+                    state.load_preview(preview, target, "Validated against current records.");
+                }
+                Err(error) => {
+                    state.invalidate(&error.to_string());
+                }
+            }
+        }
+        if parse_answer {
+            let answer = self
+                .assistant_sessions
+                .get(project_id)
+                .and_then(|session| session.turns.last())
+                .map(|turn| turn.answer.as_str())
+                .unwrap_or("");
+            match Proposal::parse_json(answer).and_then(|proposal| {
+                if proposal.project_id != project_id {
+                    return Err(pipeline_engine::ProposalError::Conflict);
+                }
+                self.engine.as_ref().unwrap().preview_proposal(&proposal)
+            }) {
+                Ok(preview) => {
+                    state.load_preview(
+                        preview,
+                        target,
+                        "Assistant suggestion validated against current records.",
+                    );
+                }
+                Err(error) => {
+                    state.invalidate(&format!("Non-executable suggestion: {error}"));
+                }
+            }
+        }
+        if !state.message.is_empty() {
+            ui.label(&state.message);
+        }
+        let mut apply = false;
+        let mut discard = false;
+        let mut repreview = false;
+        if let Some(preview) = &state.preview {
+            ui.group(|ui| {
+                ui.strong(match preview.status {
+                    ProposalStatus::Validated => "Validated proposal",
+                    ProposalStatus::RequiresSeparateApproval => {
+                        "Requires separate approval / Not supported yet"
+                    }
+                });
+                ui.label(format!(
+                    "Project: {} · Revision: {}",
+                    self.projects
+                        .iter()
+                        .find(|p| p.id == project_id)
+                        .map_or(project_id, |p| p.name.as_str()),
+                    preview.proposal.expected_revision
+                ));
+                let (target, before, after) = match &preview.proposal.change {
+                    pipeline_engine::ProposalChange::BriefField {
+                        target_id,
+                        before,
+                        after,
+                        ..
+                    }
+                    | pipeline_engine::ProposalChange::TaskDraft {
+                        target_id,
+                        before,
+                        after,
+                        ..
+                    }
+                    | pipeline_engine::ProposalChange::PlanDraft {
+                        target_id,
+                        before,
+                        after,
+                        ..
+                    } => (target_id, before, after),
+                };
+                ui.label(format!(
+                    "Target: {} · ID: {target}",
+                    match &preview.proposal.change {
+                        pipeline_engine::ProposalChange::BriefField { field, .. } =>
+                            format!("Product brief · {field:?}"),
+                        pipeline_engine::ProposalChange::TaskDraft { field, .. } =>
+                            format!("Task draft · {field:?}"),
+                        pipeline_engine::ProposalChange::PlanDraft { field, .. } =>
+                            format!("Plan milestone draft · {field:?}"),
+                    }
+                ));
+                ui.label(format!("Before: {before}"));
+                ui.label(format!("After: {after}"));
+                ui.label("Suggestion notes (unverified; these cannot grant authority):");
+                ui.label(format!("Reason: {}", preview.proposal.reason));
+                ui.label(format!(
+                    "Impact: {} · Claimed scope: {}",
+                    preview.proposal.impact, preview.proposal.affected_approved_scope
+                ));
+                ui.label(format!(
+                    "Risk: {} · Prerequisites: {}",
+                    preview.proposal.risk, preview.proposal.prerequisites
+                ));
+                ui.label(format!(
+                    "Claimed approvals: {}",
+                    preview.proposal.required_owner_approvals
+                ));
+                ui.label(format!("Recovery guidance: {}", preview.proposal.recovery));
+                ui.label(&preview.explanation);
+                ui.collapsing("Advanced evidence", |ui| {
+                    ui.label(format!("Project ID: {}", preview.proposal.project_id));
+                    ui.label(format!("Record ID: {}", preview.authoritative_record_id));
+                    ui.label(format!("Target ID: {target}"));
+                    ui.label(format!(
+                        "Evidence IDs: {:?}",
+                        preview.proposal.original_evidence_ids
+                    ));
+                    ui.label(format!("Proposal ID: {}", preview.proposal.id));
+                });
+                if preview.status == ProposalStatus::Validated {
+                    ui.checkbox(
+                        &mut state.owner_confirmed,
+                        format!(
+                            "I approve this exact Before / After as a new draft at revision {} (proposal {}).",
+                            preview.proposal.expected_revision,
+                            preview.proposal.id
+                        ),
+                    );
+                    apply = ui
+                        .add_enabled(
+                            state.owner_confirmed,
+                            egui::Button::new("Apply draft change"),
+                        )
+                        .clicked();
+                }
+                repreview = ui.button("Re-preview current state").clicked();
+                discard = ui.button("Cancel / Discard").clicked();
+            });
+        }
+        if repreview && let Some(preview) = &state.preview {
+            match self
+                .engine
+                .as_ref()
+                .unwrap()
+                .preview_proposal(&preview.proposal)
+            {
+                Ok(fresh) => {
+                    state.load_preview(fresh, target, "Preview refreshed; confirm again to apply.");
+                }
+                Err(error) => {
+                    state.invalidate(&format!(
+                        "Conflict: {error}. Create a new proposal from current values."
+                    ));
+                }
+            }
+        }
+        if discard {
+            state.invalidate("Proposal discarded without changes.");
+        }
+        if apply && let Some(preview) = state.preview.take() {
+            state.preview_input = None;
+            state.owner_confirmed = false;
+            match self.engine.as_mut().unwrap().apply_proposal(&preview, true) {
+                Ok(()) => {
+                    state.message = "Applied as a new draft revision. Separate brief or plan approval is still required.".into();
+                    self.refresh_discovery();
+                    self.refresh_plan();
+                    self.refresh_review();
+                    if let Some(engine) = &self.engine
+                        && let Ok(projects) = engine.list_overviews()
+                    {
+                        self.projects = projects;
+                    }
+                    self.refresh_global_inbox();
+                }
+                Err(error) => {
+                    state.message =
+                        format!("Apply blocked: {error}. Re-preview before trying again.");
+                }
+            }
+        }
+    }
+
     fn assistant_content(&mut self, ui: &mut egui::Ui) {
         ui.heading("Project assistant");
-        ui.label("Read-only answers. Changes require a future typed proposal and owner review.");
+        ui.label("Chat is read-only. Typed changes require validation and a separate owner Apply.");
         ui.separator();
         ui.label(if self.studio_home {
             "Context: all projects".to_owned()
@@ -2832,6 +3234,9 @@ impl DesktopApp {
                     }
                 });
         }
+        if !key.is_empty() {
+            self.proposal_content(ui, &key);
+        }
         let context = self.assistant_context().map(str::to_owned);
         ui.add(
             egui::TextEdit::multiline(self.assistant_drafts.active_mut(context.as_deref()))
@@ -2870,6 +3275,11 @@ impl DesktopApp {
     }
 
     fn modern_ui(&mut self, ui: &mut egui::Ui) {
+        if self.studio_home {
+            for draft in self.proposal_drafts.values_mut() {
+                draft.owner_confirmed = false;
+            }
+        }
         let ctx = ui.ctx().clone();
         self.poll_assistant(&ctx);
         self.poll_run(&ctx);
@@ -3012,10 +3422,17 @@ impl DesktopApp {
         if self.assistant_open && !narrow && !self.advanced_open {
             egui::Panel::right("studio_assistant")
                 .resizable(true)
-                .default_size(310.0)
-                .min_size(250.0)
+                .default_size(400.0)
+                .min_size(320.0)
                 .show(ui, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| self.assistant_content(ui));
+                    let scroll = egui::ScrollArea::vertical();
+                    #[cfg(feature = "screenshot-evidence")]
+                    let scroll = if let Ok(offset) = std::env::var("PIPELINE_UX_PROPOSAL_SCROLL") {
+                        scroll.vertical_scroll_offset(offset.parse().unwrap_or(0.0))
+                    } else {
+                        scroll
+                    };
+                    scroll.show(ui, |ui| self.assistant_content(ui));
                 });
         }
         if self.advanced_open {
@@ -3474,6 +3891,79 @@ fn main() -> eframe::Result {
 mod assistant_draft_tests {
     use super::*;
 
+    fn sample_preview(id: &str) -> ProposalPreview {
+        let raw = serde_json::json!({
+            "version": 1, "id": id, "project_id": "alpha", "expected_revision": 1,
+            "expected_approved_brief_revision": 0, "expected_scope_revision": 0,
+            "original_evidence_ids": ["brief-1"], "reason": "Refine", "impact": "Draft",
+            "affected_approved_scope": "None", "prerequisites": "Owner", "risk": "Low",
+            "required_owner_approvals": "Apply", "recovery": "Restore prior draft",
+            "change": {"type": "brief_field", "target_id": "brief-1", "field": "idea", "before": "Old", "after": "New"}
+        }).to_string();
+        ProposalPreview {
+            proposal: Proposal::parse_json(&raw).unwrap(),
+            status: ProposalStatus::Validated,
+            explanation: "Draft only".into(),
+            authoritative_record_id: "brief-1".into(),
+        }
+    }
+
+    #[test]
+    fn editing_after_preview_revokes_preview_and_confirmation() {
+        let mut draft = ProposalDraft {
+            after: "New".into(),
+            ..Default::default()
+        };
+        draft.load_preview(sample_preview("first"), "brief-1", "Validated");
+        draft.owner_confirmed = true;
+        draft.after = "Different".into();
+        draft.invalidate_if_input_changed("brief-1");
+        assert!(draft.preview.is_none());
+        assert!(!draft.owner_confirmed);
+    }
+
+    #[test]
+    fn switching_target_or_project_revokes_confirmation() {
+        let mut draft = ProposalDraft {
+            after: "New".into(),
+            ..Default::default()
+        };
+        draft.load_preview(sample_preview("first"), "brief-1", "Validated");
+        draft.owner_confirmed = true;
+        draft.kind = 1;
+        draft.invalidate_if_input_changed("task-1");
+        assert!(draft.preview.is_none());
+        assert!(!draft.owner_confirmed);
+
+        let mut app = DesktopApp::default();
+        let mut draft = ProposalDraft::default();
+        draft.load_preview(sample_preview("second"), "brief-1", "Validated");
+        draft.owner_confirmed = true;
+        app.proposal_drafts.insert("alpha".into(), draft);
+        app.select_project("beta".into());
+        assert!(!app.proposal_drafts["alpha"].owner_confirmed);
+    }
+
+    #[test]
+    fn discard_and_new_assistant_preview_require_fresh_confirmation() {
+        let mut draft = ProposalDraft::default();
+        draft.load_preview(sample_preview("first"), "brief-1", "Validated");
+        draft.owner_confirmed = true;
+        draft.invalidate("Proposal discarded without changes.");
+        assert!(draft.preview.is_none());
+        assert!(!draft.owner_confirmed);
+        draft.load_preview(
+            sample_preview("assistant-second"),
+            "brief-1",
+            "Assistant suggestion validated",
+        );
+        assert!(!draft.owner_confirmed);
+        assert_eq!(
+            draft.preview.as_ref().unwrap().proposal.id,
+            "assistant-second"
+        );
+    }
+
     #[test]
     fn drafts_are_isolated_by_project_and_portfolio() {
         let mut drafts = AssistantDrafts::default();
@@ -3484,6 +3974,19 @@ mod assistant_draft_tests {
         assert_eq!(drafts.active(Some("alpha")), "alpha question");
         assert_eq!(drafts.active(Some("beta")), "beta question");
         assert_eq!(drafts.active(None), "portfolio question");
+    }
+
+    #[test]
+    fn proposal_review_is_project_scoped_and_never_preconfirmed() {
+        let mut app = DesktopApp::default();
+        app.proposal_drafts.entry("alpha".into()).or_default().after = "Only alpha".into();
+        assert_eq!(
+            app.proposal_drafts.get("beta").map(|s| s.after.as_str()),
+            None
+        );
+        assert!(!app.proposal_drafts.get("alpha").unwrap().owner_confirmed);
+        app.proposal_drafts.remove("alpha");
+        assert!(app.proposal_drafts.is_empty());
     }
 
     #[test]

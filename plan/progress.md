@@ -24,11 +24,9 @@ Updated 12 October 2026. Task acceptance follows `plan/backlog.json`; an impleme
 
 The MacBook Pro M1 Max is not yet available. Native macOS checks remain release requirements and do not block Windows foundation work.
 
-UX04 is implemented on `codex/ux04-readonly-assistant`; PR #5 review
-refinements to cancellation, bounded workers, context sanitization, and
-regression coverage are complete. The owner-authorized OpenRouter free-model
-smoke passed with four requests; live local inference remains unverified
-because no suitable local endpoint was running. Owner final review remains pending.
-Scope and evidence are in
-`docs/ux-discovery/ux04-implementation.md`. UX05 and P16–P19 remain
+UX04 was merged as PR #5. Its bounded, tool-free read-only assistant remains
+the UX05 input boundary. UX05 typed draft proposals are implemented on
+`codex/ux05-typed-proposals` for owner PR review; scope and Windows evidence
+are in `docs/ux-discovery/ux05-implementation.md`. Native keyboard confirmation,
+screen-reader and Apple Silicon validation remain open. P16–P19 remain
 unstarted; no acceptance or release gate changed.
