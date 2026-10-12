@@ -2719,13 +2719,22 @@ impl DesktopApp {
             turn.status = "Offline guidance".into();
             session.turns.push(turn);
         } else {
-            if self
-                .assistant_workers
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                    (n < MAX_ASSISTANT_WORKERS).then_some(n + 1)
-                })
-                .is_err()
-            {
+            let mut workers = self.assistant_workers.load(Ordering::Acquire);
+            let reserved = loop {
+                if workers >= MAX_ASSISTANT_WORKERS {
+                    break false;
+                }
+                match self.assistant_workers.compare_exchange_weak(
+                    workers,
+                    workers + 1,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) {
+                    Ok(_) => break true,
+                    Err(actual) => workers = actual,
+                }
+            };
+            if !reserved {
                 turn.status = "Earlier requests are finishing; retry shortly".into();
                 session.turns.push(turn);
                 return;
